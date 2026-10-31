@@ -794,6 +794,7 @@ function initSpaceScene() {
   let projection = identity();
   let view = identity();
   let viewProjection = identity();
+  let dragDistance = 0;
 
   if (labelLayer) {
     bodies.forEach((body) => {
@@ -904,6 +905,7 @@ function initSpaceScene() {
     if (isInteractiveTarget(event.target)) return;
     dragging = true;
     moved = false;
+    dragDistance = 0;
     lastX = event.clientX;
     lastY = event.clientY;
     document.body.classList.add('is-dragging');
@@ -913,6 +915,7 @@ function initSpaceScene() {
     const dx = event.clientX - lastX;
     const dy = event.clientY - lastY;
     if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+    dragDistance += Math.abs(dx) + Math.abs(dy);
     yaw -= dx * .0045;
     pitch = Math.max(-Math.PI / 2 + .08, Math.min(Math.PI / 2 - .08, pitch - dy * .0045));
     lastX = event.clientX;
@@ -921,6 +924,8 @@ function initSpaceScene() {
   document.addEventListener('pointerup', () => {
     dragging = false;
     document.body.classList.remove('is-dragging');
+    if (dragDistance > 8) document.querySelector('.status-pill')?.replaceChildren(Object.assign(document.createElement('i'), { className: '' }), document.createTextNode(' 3D FLIGHT'));
+    dragDistance = 0;
   });
   document.addEventListener('click', (event) => {
     if (moved || isInteractiveTarget(event.target)) return;

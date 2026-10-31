@@ -38,8 +38,8 @@ button, select, input { color: inherit; }
 
 .topbar { position: relative; z-index: 4; display: flex; align-items: center; gap: 32px; width: min(1280px, calc(100% - 56px)); margin: 0 auto; padding: 24px 0; border-bottom: 1px solid rgba(191, 200, 255, .14); }
 .brand { display: inline-flex; align-items: center; gap: 12px; min-width: max-content; }
-.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgba(213, 222, 255, .42); border-radius: 50%; background: rgba(10, 13, 31, .68); box-shadow: 0 0 28px rgba(143, 126, 255, .3); }
-.brand-mark img { width: 28px; height: 28px; object-fit: contain; }
+.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgba(213, 222, 255, .42); border-radius: 50%; background: #fff; box-shadow: 0 0 28px rgba(143, 126, 255, .3); }
+.brand-mark img { width: 29px; height: 29px; object-fit: contain; }
 .brand-copy { display: grid; gap: 2px; }
 .brand strong { font-size: 12px; letter-spacing: .2em; }
 .brand small, .eyebrow, .panel-signal, .instrument-readout, .status-pill, .world-tag span, .footer { font-family: var(--mono); }
@@ -77,11 +77,11 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .flight-reticle::after { left: 5%; top: 50%; width: 90%; height: 1px; }
 .flight-reticle i { left: 50%; top: 50%; width: 16px; height: 16px; border: 1px solid var(--cyan); border-radius: 50%; background: transparent; transform: translate(-50%, -50%); box-shadow: 0 0 20px var(--cyan); }
 .flight-reticle b { left: 50%; top: 50%; width: 1px; height: 60%; background: linear-gradient(transparent, rgba(251, 141, 202, .7), transparent); transform: translate(-50%, -50%) rotate(45deg); }
-.instrument-core { position: relative; z-index: 2; display: grid; place-items: center; width: 144px; height: 144px; border: 1px solid rgba(177, 206, 255, .6); border-radius: 50%; background: radial-gradient(circle at 38% 28%, rgba(255, 255, 255, .25), rgba(74, 83, 166, .28) 30%, rgba(17, 20, 60, .7) 68%, rgba(8, 9, 23, .8)); box-shadow: 0 0 34px rgba(129, 115, 255, .6), inset 0 0 38px rgba(114, 220, 255, .19); }
+.instrument-core { position: relative; z-index: 2; display: grid; place-items: center; width: 144px; height: 144px; border: 1px solid rgba(177, 206, 255, .6); border-radius: 50%; background: #fff; box-shadow: 0 0 34px rgba(129, 115, 255, .6), inset 0 0 38px rgba(114, 220, 255, .19); }
 .instrument-core::before, .instrument-core::after { position: absolute; content: ''; border: 1px solid rgba(119, 231, 255, .36); border-radius: 50%; transform: rotate(-25deg); }
 .instrument-core::before { width: 230px; height: 70px; }
 .instrument-core::after { width: 300px; height: 96px; border-color: rgba(251, 141, 202, .25); transform: rotate(56deg); }
-.instrument-core img { width: 74px; height: 74px; filter: drop-shadow(0 0 15px rgba(119, 231, 255, .68)); }
+.instrument-core img { width: 74px; height: 74px; object-fit: contain; }
 .instrument-orbit { position: absolute; border: 1px solid rgba(129, 152, 255, .25); border-radius: 50%; transform: rotate(-24deg); }
 .orbit-a { width: 360px; height: 154px; }
 .orbit-b { width: 480px; height: 220px; border-color: rgba(251, 141, 202, .16); transform: rotate(57deg); }
