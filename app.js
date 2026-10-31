@@ -902,13 +902,17 @@ function initSpaceScene() {
   }
 
   document.addEventListener('pointerdown', (event) => {
-    if (isInteractiveTarget(event.target)) return;
+    if (event.button !== 0 || isInteractiveTarget(event.target)) return;
+    event.preventDefault();
     dragging = true;
     moved = false;
     dragDistance = 0;
     lastX = event.clientX;
     lastY = event.clientY;
     document.body.classList.add('is-dragging');
+  });
+  document.addEventListener('selectstart', (event) => {
+    if (dragging) event.preventDefault();
   });
   document.addEventListener('pointermove', (event) => {
     if (!dragging) return;
