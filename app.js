@@ -146,7 +146,16 @@ async function refreshSerialDevices() {
 }
 
 firmwareFile.addEventListener('change', () => {
-  selectedFirmware = firmwareFile.files?.[0];
+  const file = firmwareFile.files?.[0];
+  const lowerName = file?.name.toLowerCase() || '';
+  if (file && !lowerName.endsWith('.bin') && !lowerName.endsWith('.hex')) {
+    selectedFirmware = undefined;
+    firmwareName.textContent = '只支持 BIN 或 HEX 文件';
+    dfuStatus.textContent = '请选择 .bin 或 .hex 固件';
+    updateFlashButton();
+    return;
+  }
+  selectedFirmware = file;
   firmwareName.textContent = selectedFirmware
     ? `${selectedFirmware.name} · ${formatBytes(selectedFirmware.size)}`
     : '尚未选择文件';
