@@ -544,6 +544,8 @@ if ('serial' in navigator) {
 
 function initSpaceScene() {
   const canvas = document.querySelector('#spaceCanvas');
+  const backgroundCanvas = document.querySelector('#backgroundCanvas');
+  const backgroundContext = backgroundCanvas?.getContext('2d');
   const labelLayer = document.querySelector('#worldLabels');
   if (!canvas) return;
   const gl = canvas.getContext('webgl', { antialias: true, alpha: true });
@@ -815,7 +817,14 @@ function initSpaceScene() {
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     gl.viewport(0, 0, canvas.width, canvas.height);
-    projection = perspective(Math.PI / 2.8, width / height, .1, 500);
+    if (backgroundCanvas) {
+      backgroundCanvas.width = Math.floor(width * ratio);
+      backgroundCanvas.height = Math.floor(height * ratio);
+      backgroundCanvas.style.width = `${width}px`;
+      backgroundCanvas.style.height = `${height}px`;
+      backgroundContext?.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+    projection = perspective(Math.PI / 3.4, width / height, .1, 500);
   }
 
   function updateCamera() {
@@ -838,23 +847,45 @@ function initSpaceScene() {
     });
   }
 
-  function render() {
-    updateCamera();
-    gl.clearColor(.015, .018, .05, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  function draw2DBackground(time) {
+    if (!backgroundContext) return;
+    backgroundContext.clearRect(0, 0, width, height);
+    const gradient = backgroundContext.createRadialGradient(width * .5, height * .46, 0, width * .5, height * .46, Math.max(width, height) * .72);
+    gradient.addColorStop(0, '#10143a');
+    gradient.addColorStop(.48, '#080b21');
+    gradient.addColorStop(1, '#03040b');
+    backgroundContext.fillStyle = gradient;
+    backgroundContext.fillRect(0, 0, width, height);
 
-    gl.useProgram(starProgram);
-    gl.disable(gl.DEPTH_TEST);
-    gl.bindBuffer(gl.ARRAY_BUFFER, starPosition);
-    gl.enableVertexAttribArray(starAttributes.position);
-    gl.vertexAttribPointer(starAttributes.position, 3, gl.FLOAT, false, 28, 0);
-    gl.enableVertexAttribArray(starAttributes.size);
-    gl.vertexAttribPointer(starAttributes.size, 1, gl.FLOAT, false, 28, 12);
-    gl.enableVertexAttribArray(starAttributes.color);
-    gl.vertexAttribPointer(starAttributes.color, 3, gl.FLOAT, false, 28, 16);
-    gl.uniformMatrix4fv(starUniforms.projection, false, projection);
-    gl.uniformMatrix4fv(starUniforms.view, false, view);
-    gl.drawArrays(gl.POINTS, 0, stars.length / 7);
+    const nebula = backgroundContext.createRadialGradient(width * .28, height * .62, 0, width * .28, height * .62, width * .32);
+    nebula.addColorStop(0, 'rgba(105, 77, 255, .18)');
+    nebula.addColorStop(1, 'rgba(105, 77, 255, 0)');
+    backgroundContext.fillStyle = nebula;
+    backgroundContext.fillRect(0, 0, width, height);
+
+    const driftX = yaw * width * .035;
+    const driftY = pitch * height * .035;
+    for (let index = 0; index < 900; index += 1) {
+      const x = ((index * 83.17 + driftX) % (width + 40) + width + 40) % (width + 40) - 20;
+      const y = ((index * 47.91 + driftY) % (height + 40) + height + 40) % (height + 40) - 20;
+      const size = 0.35 + ((index * 17) % 100) / 150;
+      const alpha = .18 + ((index * 29) % 100) / 170;
+      const color = index % 19 === 0 ? `rgba(119, 231, 255, ${alpha})` : index % 23 === 0 ? `rgba(251, 141, 202, ${alpha})` : `rgba(220, 226, 255, ${alpha})`;
+      backgroundContext.fillStyle = color;
+      backgroundContext.beginPath();
+      backgroundContext.arc(x, y, size, 0, Math.PI * 2);
+      backgroundContext.fill();
+    }
+    backgroundContext.fillStyle = 'rgba(255, 255, 255, .055)';
+    backgroundContext.fillRect(0, height * .5, width, 1);
+    void time;
+  }
+
+  function render(time) {
+    draw2DBackground(time);
+    updateCamera();
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     gl.useProgram(bodyProgram);
     gl.enable(gl.DEPTH_TEST);
@@ -920,8 +951,8 @@ function initSpaceScene() {
     const dy = event.clientY - lastY;
     if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
     dragDistance += Math.abs(dx) + Math.abs(dy);
-    yaw -= dx * .0045;
-    pitch = Math.max(-Math.PI / 2 + .08, Math.min(Math.PI / 2 - .08, pitch - dy * .0045));
+    yaw += dx * .0045;
+    pitch = Math.max(-Math.PI / 2 + .08, Math.min(Math.PI / 2 - .08, pitch + dy * .0045));
     lastX = event.clientX;
     lastY = event.clientY;
   });
