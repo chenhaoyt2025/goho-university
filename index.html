@@ -68,9 +68,15 @@
                 </select>
                 <small>浏览器只会列出已授权设备；首次使用请点击“选择设备”。</small>
               </div>
+              <div class="firmware-picker">
+                <input id="firmwareFile" type="file" accept=".bin,.dfu,.hex,application/octet-stream" hidden />
+                <label class="button button-secondary" for="firmwareFile">选择固件文件</label>
+                <span id="firmwareName">尚未选择文件</span>
+              </div>
               <div class="card-actions">
                 <button class="button button-primary" id="dfuButton" type="button">选择 DFU 设备</button>
-                <span class="card-status" id="dfuStatus">等待设备</span>
+                <button class="button button-secondary" id="flashButton" type="button" disabled>开始烧录</button>
+                <span class="card-status" id="dfuStatus">等待设备和固件</span>
               </div>
             </article>
             <article class="tool-card" id="serial">
@@ -93,9 +99,22 @@
             </article>
           </div>
           <div class="monitor" id="monitorPanel" hidden>
-            <div class="monitor-header"><span>LIVE SERIAL OUTPUT</span><button class="text-button" id="clearLog" type="button">清空</button></div>
+            <div class="monitor-header">
+              <span>LIVE SERIAL OUTPUT <strong id="monitorState">STOPPED</strong></span>
+              <div class="monitor-actions">
+                <label>接收 <select id="receiveFormat"><option value="text">TXT</option><option value="hex">HEX</option></select></label>
+                <button class="text-button" id="startMonitor" type="button">Start</button>
+                <button class="text-button" id="stopMonitor" type="button">Stop</button>
+                <button class="text-button" id="clearLog" type="button">清空</button>
+              </div>
+            </div>
             <pre id="serialLog" aria-live="polite">等待串口数据…</pre>
-            <form class="send-row" id="sendForm"><input id="sendInput" placeholder="输入要发送的内容" autocomplete="off" /><button class="button button-primary" type="submit">发送 ↗</button></form>
+            <form class="send-row" id="sendForm">
+              <select id="sendFormat" aria-label="Send format"><option value="text">TXT</option><option value="hex">HEX</option></select>
+              <select id="lineEnding" aria-label="Line ending"><option value="none">无结尾</option><option value="lf">LF</option><option value="crlf">CRLF</option></select>
+              <input id="sendInput" placeholder="TXT 文本，或 HEX：01 03 00 00" autocomplete="off" />
+              <button class="button button-primary" type="submit">发送 ↗</button>
+            </form>
           </div>
         </section>
 
