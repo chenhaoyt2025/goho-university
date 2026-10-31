@@ -30,6 +30,10 @@ button, select, input { color: inherit; }
 .star-wash { pointer-events: none; }
 #spaceCanvas.is-dragging { cursor: grabbing; }
 .star-wash { z-index: 1; background: radial-gradient(ellipse at 20% 45%, rgba(100, 83, 255, .13), transparent 35%), radial-gradient(ellipse at 80% 20%, rgba(73, 201, 255, .11), transparent 32%), linear-gradient(180deg, rgba(2, 3, 13, .18), rgba(4, 5, 15, .54)); mix-blend-mode: screen; }
+.world-labels { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.world-label { position: absolute; padding: 5px 8px 5px 15px; border-left: 1px solid var(--world-color, var(--cyan)); color: var(--world-color, var(--cyan)); font: 10px var(--mono); letter-spacing: .12em; text-shadow: 0 0 12px currentColor; white-space: nowrap; transform: translate3d(-50%, -50%, 0); }
+.world-label::before { position: absolute; content: ''; left: -4px; top: 50%; width: 7px; height: 7px; border: 1px solid var(--world-color, var(--cyan)); border-radius: 50%; background: #070917; transform: translateY(-50%); box-shadow: 0 0 12px var(--world-color, var(--cyan)); }
+.space-app.no-webgl #spaceCanvas { display: none; }
 
 .topbar { position: relative; z-index: 4; display: flex; align-items: center; gap: 32px; width: min(1280px, calc(100% - 56px)); margin: 0 auto; padding: 24px 0; border-bottom: 1px solid rgba(191, 200, 255, .14); }
 .brand { display: inline-flex; align-items: center; gap: 12px; min-width: max-content; }

@@ -544,23 +544,245 @@ if ('serial' in navigator) {
 
 function initSpaceScene() {
   const canvas = document.querySelector('#spaceCanvas');
+  const labelLayer = document.querySelector('#worldLabels');
   if (!canvas) return;
-  const context = canvas.getContext('2d');
-  const stars = Array.from({ length: 420 }, (_, index) => ({
-    x: ((index * 97) % 1000) / 1000,
-    y: ((index * 53) % 1000) / 1000,
-    z: ((index * 71) % 1000) / 1000,
-    size: 0.35 + ((index * 19) % 100) / 130,
-    tint: index % 7 === 0 ? 'cyan' : index % 11 === 0 ? 'pink' : 'white',
-  }));
+  const gl = canvas.getContext('webgl', { antialias: true, alpha: true });
+  if (!gl) {
+    document.querySelector('.space-app')?.classList.add('no-webgl');
+    return;
+  }
+
   const bodies = [
-    { key: 'eurorack', label: 'Eurorack', x: -0.65, y: -0.18, z: 0.35, radius: 41, color: '#77e7ff', target: '#products' },
-    { key: 'fx', label: 'FX Pedal', x: 0.16, y: -0.52, z: 0.7, radius: 27, color: '#fb8dca', target: '#products' },
-    { key: 'vst', label: 'VST', x: 0.74, y: -0.13, z: 0.24, radius: 34, color: '#a88bff', target: '#products' },
-    { key: 'max', label: 'Max/MSP', x: -0.42, y: 0.48, z: 0.55, radius: 29, color: '#c5ff76', target: '#products' },
-    { key: 'macos', label: 'macOS App', x: 0.35, y: 0.56, z: 0.82, radius: 24, color: '#8db6ff', target: '#products' },
-    { key: 'tools', label: 'Device Bridge', x: 0.02, y: 0.08, z: 0.08, radius: 53, color: '#77e7ff', target: '#tools' },
+    { key: 'tools', label: 'DEVICE BRIDGE', position: [0, -1, -15], radius: 2.6, color: [0.28, 0.86, 1], glow: 1.35, target: '#tools' },
+    { key: 'eurorack', label: 'EURORACK', position: [-19, 5, -36], radius: 3.9, color: [0.26, 0.72, 1], glow: 1.1, target: '#products' },
+    { key: 'fx', label: 'FX PEDAL', position: [15, -8, -28], radius: 2.9, color: [1, 0.33, 0.66], glow: 1.2, target: '#products' },
+    { key: 'vst', label: 'VST', position: [26, 11, -58], radius: 4.5, color: [0.55, 0.42, 1], glow: 1.1, target: '#products' },
+    { key: 'max', label: 'MAX / MSP', position: [-31, -12, -47], radius: 3.25, color: [0.67, 1, 0.31], glow: 1.1, target: '#products' },
+    { key: 'macos', label: 'MACOS APP', position: [10, 20, -76], radius: 2.65, color: [0.36, 0.62, 1], glow: 1.0, target: '#products' },
+    { key: 'satellite', label: 'U MODULE', position: [36, 16, 24], radius: 1.8, color: [0.93, 0.72, 0.4], glow: .8, target: '#products' },
+    { key: 'neutron', label: 'NOISE STAR', position: [-42, 14, 18], radius: 2.2, color: [0.7, 0.33, 1], glow: 1.5, target: '#products' },
   ];
+
+  const stars = [];
+  let seed = 1837;
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  for (let index = 0; index < 1400; index += 1) {
+    const theta = random() * Math.PI * 2;
+    const phi = Math.acos(2 * random() - 1);
+    const radius = 85 + random() * 235;
+    const tint = index % 13 === 0 ? [0.45, 0.88, 1] : index % 17 === 0 ? [1, 0.42, 0.73] : [0.66 + random() * .3, 0.73 + random() * .22, 1];
+    stars.push(
+      Math.sin(phi) * Math.cos(theta) * radius,
+      Math.cos(phi) * radius,
+      Math.sin(phi) * Math.sin(theta) * radius,
+      1.8 + random() * 2.4,
+      tint[0], tint[1], tint[2],
+    );
+  }
+
+  const vertexShader = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    uniform mat4 uProjection;
+    uniform mat4 uView;
+    uniform mat4 uModel;
+    varying vec3 vNormal;
+    varying vec3 vWorld;
+    void main() {
+      vec4 world = uModel * vec4(aPosition, 1.0);
+      vNormal = aNormal;
+      vWorld = world.xyz;
+      gl_Position = uProjection * uView * world;
+    }
+  `;
+  const fragmentShader = `
+    precision mediump float;
+    uniform vec3 uColor;
+    uniform vec3 uLight;
+    uniform float uGlow;
+    varying vec3 vNormal;
+    varying vec3 vWorld;
+    void main() {
+      vec3 normal = normalize(vNormal);
+      vec3 lightDirection = normalize(uLight - vWorld);
+      float diffuse = max(dot(normal, lightDirection), 0.0);
+      vec3 viewDirection = normalize(-vWorld);
+      float rim = pow(1.0 - max(dot(viewDirection, normal), 0.0), 2.4);
+      vec3 color = uColor * (0.16 + diffuse * 0.92);
+      color += vec3(0.24, 0.38, 0.7) * rim * uGlow;
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `;
+  const starVertexShader = `
+    attribute vec3 aPosition;
+    attribute float aSize;
+    attribute vec3 aColor;
+    uniform mat4 uProjection;
+    uniform mat4 uView;
+    varying vec3 vColor;
+    void main() {
+      vec4 clip = uProjection * uView * vec4(aPosition, 1.0);
+      gl_Position = clip;
+      gl_PointSize = max(1.0, aSize * (88.0 / max(1.0, clip.w)));
+      vColor = aColor;
+    }
+  `;
+  const starFragmentShader = `
+    precision mediump float;
+    varying vec3 vColor;
+    void main() {
+      float distanceFromCenter = distance(gl_PointCoord, vec2(0.5));
+      if (distanceFromCenter > 0.5) discard;
+      float alpha = smoothstep(0.5, 0.05, distanceFromCenter);
+      gl_FragColor = vec4(vColor, alpha);
+    }
+  `;
+
+  function compileShader(source, type) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+    return shader;
+  }
+
+  function createProgram(vertexSource, fragmentSource) {
+    const program = gl.createProgram();
+    gl.attachShader(program, compileShader(vertexSource, gl.VERTEX_SHADER));
+    gl.attachShader(program, compileShader(fragmentSource, gl.FRAGMENT_SHADER));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+    return program;
+  }
+
+  function createBuffer(data, target = gl.ARRAY_BUFFER, usage = gl.STATIC_DRAW) {
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(target, buffer);
+    gl.bufferData(target, data, usage);
+    return buffer;
+  }
+
+  function createSphere(rows = 28, columns = 40) {
+    const positions = [];
+    const normals = [];
+    const indices = [];
+    for (let row = 0; row <= rows; row += 1) {
+      const v = row / rows;
+      const phi = v * Math.PI;
+      for (let column = 0; column <= columns; column += 1) {
+        const u = column / columns;
+        const theta = u * Math.PI * 2;
+        const x = Math.sin(phi) * Math.cos(theta);
+        const y = Math.cos(phi);
+        const z = Math.sin(phi) * Math.sin(theta);
+        positions.push(x, y, z);
+        normals.push(x, y, z);
+      }
+    }
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const first = row * (columns + 1) + column;
+        const second = first + columns + 1;
+        indices.push(first, second, first + 1, second, second + 1, first + 1);
+      }
+    }
+    return {
+      position: createBuffer(new Float32Array(positions)),
+      normal: createBuffer(new Float32Array(normals)),
+      index: createBuffer(new Uint16Array(indices), gl.ELEMENT_ARRAY_BUFFER),
+      count: indices.length,
+    };
+  }
+
+  const sphere = createSphere();
+  const starPosition = createBuffer(new Float32Array(stars));
+  const bodyProgram = createProgram(vertexShader, fragmentShader);
+  const starProgram = createProgram(starVertexShader, starFragmentShader);
+  const bodyAttributes = {
+    position: gl.getAttribLocation(bodyProgram, 'aPosition'),
+    normal: gl.getAttribLocation(bodyProgram, 'aNormal'),
+  };
+  const bodyUniforms = {
+    projection: gl.getUniformLocation(bodyProgram, 'uProjection'),
+    view: gl.getUniformLocation(bodyProgram, 'uView'),
+    model: gl.getUniformLocation(bodyProgram, 'uModel'),
+    color: gl.getUniformLocation(bodyProgram, 'uColor'),
+    light: gl.getUniformLocation(bodyProgram, 'uLight'),
+    glow: gl.getUniformLocation(bodyProgram, 'uGlow'),
+  };
+  const starAttributes = {
+    position: gl.getAttribLocation(starProgram, 'aPosition'),
+    size: gl.getAttribLocation(starProgram, 'aSize'),
+    color: gl.getAttribLocation(starProgram, 'aColor'),
+  };
+  const starUniforms = {
+    projection: gl.getUniformLocation(starProgram, 'uProjection'),
+    view: gl.getUniformLocation(starProgram, 'uView'),
+  };
+
+  function identity() {
+    return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  }
+
+  function multiply(a, b) {
+    const out = new Float32Array(16);
+    for (let column = 0; column < 4; column += 1) {
+      for (let row = 0; row < 4; row += 1) {
+        out[column * 4 + row] = a[row] * b[column * 4]
+          + a[4 + row] * b[column * 4 + 1]
+          + a[8 + row] * b[column * 4 + 2]
+          + a[12 + row] * b[column * 4 + 3];
+      }
+    }
+    return out;
+  }
+
+  function perspective(fov, aspect, near, far) {
+    const f = 1 / Math.tan(fov / 2);
+    const range = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (near + far) * range, -1,
+      0, 0, near * far * 2 * range, 0,
+    ]);
+  }
+
+  function rotateX(angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return new Float32Array([1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1]);
+  }
+
+  function rotateY(angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1]);
+  }
+
+  function modelMatrix(position, radius) {
+    const matrix = identity();
+    matrix[0] = radius;
+    matrix[5] = radius;
+    matrix[10] = radius;
+    matrix[12] = position[0];
+    matrix[13] = position[1];
+    matrix[14] = position[2];
+    return matrix;
+  }
+
+  function transformPoint(matrix, point) {
+    return {
+      x: matrix[0] * point[0] + matrix[4] * point[1] + matrix[8] * point[2] + matrix[12],
+      y: matrix[1] * point[0] + matrix[5] * point[1] + matrix[9] * point[2] + matrix[13],
+      z: matrix[2] * point[0] + matrix[6] * point[1] + matrix[10] * point[2] + matrix[14],
+      w: matrix[3] * point[0] + matrix[7] * point[1] + matrix[11] * point[2] + matrix[15],
+    };
+  }
+
   let width = 0;
   let height = 0;
   let yaw = 0;
@@ -569,7 +791,19 @@ function initSpaceScene() {
   let moved = false;
   let lastX = 0;
   let lastY = 0;
-  let projectedBodies = [];
+  let projection = identity();
+  let view = identity();
+  let viewProjection = identity();
+
+  if (labelLayer) {
+    bodies.forEach((body) => {
+      const label = document.createElement('span');
+      label.className = `world-label world-label-${body.key}`;
+      label.textContent = body.label;
+      labelLayer.append(label);
+      body.labelElement = label;
+    });
+  }
 
   function resize() {
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -579,110 +813,87 @@ function initSpaceScene() {
     canvas.height = Math.floor(height * ratio);
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    projection = perspective(Math.PI / 2.8, width / height, .1, 500);
   }
 
-  function rotate(point) {
-    const cy = Math.cos(yaw);
-    const sy = Math.sin(yaw);
-    const cp = Math.cos(pitch);
-    const sp = Math.sin(pitch);
-    const x = point.x * cy - point.z * sy;
-    const z = point.x * sy + point.z * cy;
-    return { x, y: point.y * cp - z * sp, z: point.y * sp + z * cp };
+  function updateCamera() {
+    view = multiply(rotateX(-pitch), rotateY(-yaw));
+    viewProjection = multiply(projection, view);
   }
 
-  function project(point) {
-    const rotated = rotate(point);
-    const depth = rotated.z + 1.45;
-    const scale = Math.min(width, height) * 0.45 / depth;
-    return { x: width / 2 + rotated.x * scale, y: height / 2 + rotated.y * scale, scale, depth };
-  }
-
-  function drawGlow(x, y, radius, color, alpha = 1) {
-    const glow = context.createRadialGradient(x, y, radius * .05, x, y, radius * 1.8);
-    glow.addColorStop(0, `${color}${Math.round(0.7 * alpha * 255).toString(16).padStart(2, '0')}`);
-    glow.addColorStop(.35, `${color}${Math.round(0.18 * alpha * 255).toString(16).padStart(2, '0')}`);
-    glow.addColorStop(1, `${color}00`);
-    context.fillStyle = glow;
-    context.beginPath();
-    context.arc(x, y, radius * 1.8, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  function draw(time) {
-    context.clearRect(0, 0, width, height);
-    const background = context.createRadialGradient(width * .5, height * .45, 0, width * .5, height * .45, Math.max(width, height) * .7);
-    background.addColorStop(0, '#16163b');
-    background.addColorStop(.42, '#090b20');
-    background.addColorStop(1, '#04050e');
-    context.fillStyle = background;
-    context.fillRect(0, 0, width, height);
-
-    stars.forEach((star) => {
-      const drift = (time * 0.000012 * (1 - star.z) + yaw * .04) % 1;
-      const x = ((star.x + drift + 1) % 1) * width;
-      const y = ((star.y + pitch * .08 + 1) % 1) * height;
-      const alpha = .18 + (1 - star.z) * .62;
-      const colors = { cyan: '#77e7ff', pink: '#fb8dca', white: '#dce3ff' };
-      context.fillStyle = colors[star.tint];
-      context.globalAlpha = alpha;
-      context.beginPath();
-      context.arc(x, y, star.size * (1.2 - star.z * .5), 0, Math.PI * 2);
-      context.fill();
-    });
-    context.globalAlpha = 1;
-
-    const nebula = context.createRadialGradient(width * .32, height * .62, 0, width * .32, height * .62, width * .36);
-    nebula.addColorStop(0, 'rgba(123, 73, 255, .16)');
-    nebula.addColorStop(1, 'rgba(123, 73, 255, 0)');
-    context.fillStyle = nebula;
-    context.fillRect(0, 0, width, height);
-
-    projectedBodies = bodies.map((body) => ({ body, ...project(body) })).sort((a, b) => b.depth - a.depth);
-    projectedBodies.forEach(({ body, x, y, scale, depth }) => {
-      const radius = Math.max(8, body.radius * Math.min(1.35, scale / (Math.min(width, height) * .34)));
-      drawGlow(x, y, radius, body.color, depth < 1.4 ? 1.1 : .72);
-      context.globalAlpha = .8;
-      context.strokeStyle = body.color;
-      context.lineWidth = 1;
-      context.beginPath();
-      context.ellipse(x, y, radius * 1.9, radius * .54, -0.25, 0, Math.PI * 2);
-      context.stroke();
-      context.globalAlpha = 1;
-      const planet = context.createRadialGradient(x - radius * .35, y - radius * .45, radius * .05, x, y, radius);
-      planet.addColorStop(0, '#ffffff');
-      planet.addColorStop(.08, body.color);
-      planet.addColorStop(.52, `${body.color}bb`);
-      planet.addColorStop(1, '#080a1f');
-      context.fillStyle = planet;
-      context.beginPath();
-      context.arc(x, y, radius, 0, Math.PI * 2);
-      context.fill();
-      context.strokeStyle = `${body.color}aa`;
-      context.stroke();
-      if (body.key === 'tools') {
-        context.strokeStyle = 'rgba(255,255,255,.44)';
-        context.beginPath();
-        context.arc(x, y, radius * .72, 0, Math.PI * 2);
-        context.stroke();
+  function updateLabels() {
+    bodies.forEach((body) => {
+      if (!body.labelElement) return;
+      const point = transformPoint(viewProjection, [body.position[0], body.position[1] + body.radius * 1.35, body.position[2]]);
+      const visible = point.w > 0 && point.z > -point.w && point.z < point.w && point.x > -point.w && point.x < point.w && point.y > -point.w && point.y < point.w;
+      body.labelElement.hidden = !visible;
+      if (visible) {
+        const x = (point.x / point.w * .5 + .5) * width;
+        const y = (-point.y / point.w * .5 + .5) * height;
+        body.labelElement.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        body.labelElement.style.setProperty('--world-color', `rgb(${body.color.map((value) => Math.round(value * 255)).join(',')})`);
       }
-      context.fillStyle = '#edf0ff';
-      context.font = '10px "DM Mono", monospace';
-      context.textAlign = 'center';
-      context.fillText(body.label.toUpperCase(), x, y + radius + 17);
     });
+  }
 
-    requestAnimationFrame(draw);
+  function render() {
+    updateCamera();
+    gl.clearColor(.015, .018, .05, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.useProgram(starProgram);
+    gl.disable(gl.DEPTH_TEST);
+    gl.bindBuffer(gl.ARRAY_BUFFER, starPosition);
+    gl.enableVertexAttribArray(starAttributes.position);
+    gl.vertexAttribPointer(starAttributes.position, 3, gl.FLOAT, false, 28, 0);
+    gl.enableVertexAttribArray(starAttributes.size);
+    gl.vertexAttribPointer(starAttributes.size, 1, gl.FLOAT, false, 28, 12);
+    gl.enableVertexAttribArray(starAttributes.color);
+    gl.vertexAttribPointer(starAttributes.color, 3, gl.FLOAT, false, 28, 16);
+    gl.uniformMatrix4fv(starUniforms.projection, false, projection);
+    gl.uniformMatrix4fv(starUniforms.view, false, view);
+    gl.drawArrays(gl.POINTS, 0, stars.length / 7);
+
+    gl.useProgram(bodyProgram);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.bindBuffer(gl.ARRAY_BUFFER, sphere.position);
+    gl.enableVertexAttribArray(bodyAttributes.position);
+    gl.vertexAttribPointer(bodyAttributes.position, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, sphere.normal);
+    gl.enableVertexAttribArray(bodyAttributes.normal);
+    gl.vertexAttribPointer(bodyAttributes.normal, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphere.index);
+    gl.uniformMatrix4fv(bodyUniforms.projection, false, projection);
+    gl.uniformMatrix4fv(bodyUniforms.view, false, view);
+    gl.uniform3f(bodyUniforms.light, -35, 45, 25);
+    bodies.forEach((body) => {
+      gl.uniformMatrix4fv(bodyUniforms.model, false, modelMatrix(body.position, body.radius));
+      gl.uniform3fv(bodyUniforms.color, body.color);
+      gl.uniform1f(bodyUniforms.glow, body.glow);
+      gl.drawElements(gl.TRIANGLES, sphere.count, gl.UNSIGNED_SHORT, 0);
+    });
+    updateLabels();
+    requestAnimationFrame(render);
   }
 
   function focusWorld(key) {
     const body = bodies.find((item) => item.key === key);
     if (!body) return;
-    yaw += body.x * .12;
-    pitch -= body.y * .08;
-    const target = document.querySelector(body.target);
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    yaw = Math.atan2(-body.position[0], -body.position[2]);
+    pitch = Math.atan2(body.position[1], Math.hypot(body.position[0], body.position[2]));
+    document.querySelector(body.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function screenPosition(body) {
+    const point = transformPoint(viewProjection, body.position);
+    if (point.w <= 0) return undefined;
+    return {
+      x: (point.x / point.w * .5 + .5) * width,
+      y: (-point.y / point.w * .5 + .5) * height,
+      radius: Math.max(10, body.radius * (height / (2 * Math.tan(Math.PI / 5.6))) / point.w),
+    };
   }
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -698,22 +909,20 @@ function initSpaceScene() {
     const dx = event.clientX - lastX;
     const dy = event.clientY - lastY;
     if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
-    yaw += dx * .004;
-    pitch = Math.max(-.9, Math.min(.9, pitch + dy * .003));
+    yaw -= dx * .0045;
+    pitch = Math.max(-Math.PI / 2 + .08, Math.min(Math.PI / 2 - .08, pitch - dy * .0045));
     lastX = event.clientX;
     lastY = event.clientY;
   });
   canvas.addEventListener('pointerup', (event) => {
     dragging = false;
     canvas.classList.remove('is-dragging');
-    canvas.releasePointerCapture(event.pointerId);
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   });
   canvas.addEventListener('click', (event) => {
     if (moved) return;
-    const hit = projectedBodies.find(({ x, y, body, scale }) => {
-      const radius = Math.max(8, body.radius * Math.min(1.35, scale / (Math.min(width, height) * .34)));
-      return Math.hypot(event.clientX - x, event.clientY - y) < radius + 16;
-    });
+    updateCamera();
+    const hit = bodies.map((body) => ({ body, position: screenPosition(body) })).filter((item) => item.position).sort((a, b) => a.position.radius - b.position.radius).find(({ position }) => Math.hypot(event.clientX - position.x, event.clientY - position.y) < position.radius + 18);
     if (hit) focusWorld(hit.body.key);
   });
   document.querySelectorAll('[data-world]').forEach((tag) => {
@@ -721,9 +930,8 @@ function initSpaceScene() {
   });
   window.addEventListener('resize', resize);
   resize();
-  requestAnimationFrame(draw);
+  render();
 }
-
 initSpaceScene();
 refreshUsbDevices();
 refreshSerialDevices();
