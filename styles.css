@@ -18,7 +18,7 @@ button, input, select { font: inherit; }
 .shell { width: min(1180px, calc(100% - 48px)); margin: auto; }
 .topbar { min-height: 82px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 11px; letter-spacing: .04em; }
-.brand-mark { display: grid; place-items: center; width: 35px; height: 35px; border: 1px solid var(--accent); color: var(--accent); font-weight: 800; }
+.brand-mark { display: grid; place-items: center; width: 47px; height: 38px; color: var(--accent); } .cat-logo img { display: block; width: 100%; height: 100%; }
 .brand strong, .brand small { display: block; line-height: 1.15; }
 .brand strong { font-size: 13px; }
 .brand small { margin-top: 4px; color: var(--muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
