@@ -2,14 +2,10 @@ const dfuButton = document.querySelector('#dfuButton');
 const flashButton = document.querySelector('#flashButton');
 const flashProgress = document.querySelector('#flashProgress');
 const dfuStatus = document.querySelector('#dfuStatus');
-const usbDeviceSelect = document.querySelector('#usbDeviceSelect');
-const refreshUsb = document.querySelector('#refreshUsb');
 const firmwareFile = document.querySelector('#firmwareFile');
 const firmwareName = document.querySelector('#firmwareName');
 const serialButton = document.querySelector('#serialButton');
 const serialStatus = document.querySelector('#serialStatus');
-const serialDeviceSelect = document.querySelector('#serialDeviceSelect');
-const refreshSerial = document.querySelector('#refreshSerial');
 const monitorPanel = document.querySelector('#monitorPanel');
 const monitorState = document.querySelector('#monitorState');
 const startMonitor = document.querySelector('#startMonitor');
@@ -43,7 +39,6 @@ const STM32_FLASH_START = 0x08000000;
 const STM32_H7_SECTOR_SIZE = 128 * 1024;
 
 let usbDevices = [];
-let serialPorts = [];
 let selectedUsbDevice;
 let selectedFirmware;
 let serialPort;
@@ -108,41 +103,15 @@ function addBytes(direction, bytes) {
 }
 
 async function refreshUsbDevices() {
-  if (!('usb' in navigator)) {
-    usbDeviceSelect.innerHTML = '<option value="">当前浏览器不支持 WebUSB</option>';
-    return;
-  }
+  if (!('usb' in navigator)) return;
   usbDevices = await navigator.usb.getDevices();
-  usbDeviceSelect.innerHTML = '';
-  if (!usbDevices.length) {
-    usbDeviceSelect.add(new Option('尚未发现已授权的 USB 设备', ''));
-    selectedUsbDevice = undefined;
-    updateFlashButton();
-    return;
-  }
-  usbDevices.forEach((device, index) => {
-    usbDeviceSelect.add(new Option(`${deviceName(device)} · ${device.serialNumber || '无序列号'}`, String(index)));
-  });
-  if (selectedUsbDevice) {
-    const selectedIndex = usbDevices.indexOf(selectedUsbDevice);
-    if (selectedIndex >= 0) usbDeviceSelect.value = String(selectedIndex);
-  }
+  if (selectedUsbDevice && !usbDevices.includes(selectedUsbDevice)) selectedUsbDevice = undefined;
+  updateFlashButton();
 }
 
 async function refreshSerialDevices() {
-  if (!('serial' in navigator)) {
-    serialDeviceSelect.innerHTML = '<option value="">当前浏览器不支持 Web Serial</option>';
-    return;
-  }
-  serialPorts = await navigator.serial.getPorts();
-  serialDeviceSelect.innerHTML = '';
-  if (!serialPorts.length) {
-    serialDeviceSelect.add(new Option('尚未发现已授权的串口设备', ''));
-    return;
-  }
-  serialPorts.forEach((port, index) => {
-    serialDeviceSelect.add(new Option(portName(port), String(index)));
-  });
+  if (!('serial' in navigator)) return;
+  await navigator.serial.getPorts();
 }
 
 firmwareFile.addEventListener('change', () => {
@@ -163,11 +132,6 @@ firmwareFile.addEventListener('change', () => {
   updateFlashButton();
 });
 
-usbDeviceSelect.addEventListener('change', () => {
-  selectedUsbDevice = usbDevices[Number(usbDeviceSelect.value)];
-  dfuStatus.textContent = selectedUsbDevice ? `已选择：${deviceName(selectedUsbDevice)}` : '等待 DFU 设备';
-  updateFlashButton();
-});
 
 dfuButton.addEventListener('click', async () => {
   if (!('usb' in navigator)) {
@@ -177,8 +141,6 @@ dfuButton.addEventListener('click', async () => {
   try {
     selectedUsbDevice = await navigator.usb.requestDevice({ filters: [] });
     await refreshUsbDevices();
-    const index = usbDevices.indexOf(selectedUsbDevice);
-    if (index >= 0) usbDeviceSelect.value = String(index);
     dfuStatus.textContent = `已选择：${deviceName(selectedUsbDevice)}${selectedFirmware ? '' : '，请再选择固件'}`;
     updateFlashButton();
   } catch (error) {
@@ -457,9 +419,6 @@ async function flashDfu() {
 }
 
 flashButton.addEventListener('click', flashDfu);
-refreshUsb.addEventListener('click', () => refreshUsbDevices().catch((error) => {
-  dfuStatus.textContent = `刷新失败：${error.message}`;
-}));
 
 async function readSerial() {
   if (!serialPort?.readable || monitorRunning) return;
@@ -508,7 +467,7 @@ serialButton.addEventListener('click', async () => {
       }
       await serialPort.close();
       serialPort = undefined;
-      serialButton.textContent = '弹窗选择串口';
+      serialButton.textContent = '选择 CDC 设备';
       serialStatus.textContent = '已断开';
       return;
     }
@@ -533,9 +492,6 @@ serialButton.addEventListener('click', async () => {
   }
 });
 
-refreshSerial.addEventListener('click', () => refreshSerialDevices().catch((error) => {
-  serialStatus.textContent = `刷新失败：${error.message}`;
-}));
 
 function parseHex(value) {
   const tokens = value.trim().replaceAll(',', ' ').split(/\s+/).filter(Boolean);
@@ -586,5 +542,188 @@ if ('serial' in navigator) {
   navigator.serial.addEventListener('disconnect', refreshSerialDevices);
 }
 
+function initSpaceScene() {
+  const canvas = document.querySelector('#spaceCanvas');
+  if (!canvas) return;
+  const context = canvas.getContext('2d');
+  const stars = Array.from({ length: 420 }, (_, index) => ({
+    x: ((index * 97) % 1000) / 1000,
+    y: ((index * 53) % 1000) / 1000,
+    z: ((index * 71) % 1000) / 1000,
+    size: 0.35 + ((index * 19) % 100) / 130,
+    tint: index % 7 === 0 ? 'cyan' : index % 11 === 0 ? 'pink' : 'white',
+  }));
+  const bodies = [
+    { key: 'eurorack', label: 'Eurorack', x: -0.65, y: -0.18, z: 0.35, radius: 41, color: '#77e7ff', target: '#products' },
+    { key: 'fx', label: 'FX Pedal', x: 0.16, y: -0.52, z: 0.7, radius: 27, color: '#fb8dca', target: '#products' },
+    { key: 'vst', label: 'VST', x: 0.74, y: -0.13, z: 0.24, radius: 34, color: '#a88bff', target: '#products' },
+    { key: 'max', label: 'Max/MSP', x: -0.42, y: 0.48, z: 0.55, radius: 29, color: '#c5ff76', target: '#products' },
+    { key: 'macos', label: 'macOS App', x: 0.35, y: 0.56, z: 0.82, radius: 24, color: '#8db6ff', target: '#products' },
+    { key: 'tools', label: 'Device Bridge', x: 0.02, y: 0.08, z: 0.08, radius: 53, color: '#77e7ff', target: '#tools' },
+  ];
+  let width = 0;
+  let height = 0;
+  let yaw = 0;
+  let pitch = 0;
+  let dragging = false;
+  let moved = false;
+  let lastX = 0;
+  let lastY = 0;
+  let projectedBodies = [];
+
+  function resize() {
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+
+  function rotate(point) {
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    const cp = Math.cos(pitch);
+    const sp = Math.sin(pitch);
+    const x = point.x * cy - point.z * sy;
+    const z = point.x * sy + point.z * cy;
+    return { x, y: point.y * cp - z * sp, z: point.y * sp + z * cp };
+  }
+
+  function project(point) {
+    const rotated = rotate(point);
+    const depth = rotated.z + 1.45;
+    const scale = Math.min(width, height) * 0.45 / depth;
+    return { x: width / 2 + rotated.x * scale, y: height / 2 + rotated.y * scale, scale, depth };
+  }
+
+  function drawGlow(x, y, radius, color, alpha = 1) {
+    const glow = context.createRadialGradient(x, y, radius * .05, x, y, radius * 1.8);
+    glow.addColorStop(0, `${color}${Math.round(0.7 * alpha * 255).toString(16).padStart(2, '0')}`);
+    glow.addColorStop(.35, `${color}${Math.round(0.18 * alpha * 255).toString(16).padStart(2, '0')}`);
+    glow.addColorStop(1, `${color}00`);
+    context.fillStyle = glow;
+    context.beginPath();
+    context.arc(x, y, radius * 1.8, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  function draw(time) {
+    context.clearRect(0, 0, width, height);
+    const background = context.createRadialGradient(width * .5, height * .45, 0, width * .5, height * .45, Math.max(width, height) * .7);
+    background.addColorStop(0, '#16163b');
+    background.addColorStop(.42, '#090b20');
+    background.addColorStop(1, '#04050e');
+    context.fillStyle = background;
+    context.fillRect(0, 0, width, height);
+
+    stars.forEach((star) => {
+      const drift = (time * 0.000012 * (1 - star.z) + yaw * .04) % 1;
+      const x = ((star.x + drift + 1) % 1) * width;
+      const y = ((star.y + pitch * .08 + 1) % 1) * height;
+      const alpha = .18 + (1 - star.z) * .62;
+      const colors = { cyan: '#77e7ff', pink: '#fb8dca', white: '#dce3ff' };
+      context.fillStyle = colors[star.tint];
+      context.globalAlpha = alpha;
+      context.beginPath();
+      context.arc(x, y, star.size * (1.2 - star.z * .5), 0, Math.PI * 2);
+      context.fill();
+    });
+    context.globalAlpha = 1;
+
+    const nebula = context.createRadialGradient(width * .32, height * .62, 0, width * .32, height * .62, width * .36);
+    nebula.addColorStop(0, 'rgba(123, 73, 255, .16)');
+    nebula.addColorStop(1, 'rgba(123, 73, 255, 0)');
+    context.fillStyle = nebula;
+    context.fillRect(0, 0, width, height);
+
+    projectedBodies = bodies.map((body) => ({ body, ...project(body) })).sort((a, b) => b.depth - a.depth);
+    projectedBodies.forEach(({ body, x, y, scale, depth }) => {
+      const radius = Math.max(8, body.radius * Math.min(1.35, scale / (Math.min(width, height) * .34)));
+      drawGlow(x, y, radius, body.color, depth < 1.4 ? 1.1 : .72);
+      context.globalAlpha = .8;
+      context.strokeStyle = body.color;
+      context.lineWidth = 1;
+      context.beginPath();
+      context.ellipse(x, y, radius * 1.9, radius * .54, -0.25, 0, Math.PI * 2);
+      context.stroke();
+      context.globalAlpha = 1;
+      const planet = context.createRadialGradient(x - radius * .35, y - radius * .45, radius * .05, x, y, radius);
+      planet.addColorStop(0, '#ffffff');
+      planet.addColorStop(.08, body.color);
+      planet.addColorStop(.52, `${body.color}bb`);
+      planet.addColorStop(1, '#080a1f');
+      context.fillStyle = planet;
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = `${body.color}aa`;
+      context.stroke();
+      if (body.key === 'tools') {
+        context.strokeStyle = 'rgba(255,255,255,.44)';
+        context.beginPath();
+        context.arc(x, y, radius * .72, 0, Math.PI * 2);
+        context.stroke();
+      }
+      context.fillStyle = '#edf0ff';
+      context.font = '10px "DM Mono", monospace';
+      context.textAlign = 'center';
+      context.fillText(body.label.toUpperCase(), x, y + radius + 17);
+    });
+
+    requestAnimationFrame(draw);
+  }
+
+  function focusWorld(key) {
+    const body = bodies.find((item) => item.key === key);
+    if (!body) return;
+    yaw += body.x * .12;
+    pitch -= body.y * .08;
+    const target = document.querySelector(body.target);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  canvas.addEventListener('pointerdown', (event) => {
+    dragging = true;
+    moved = false;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    canvas.classList.add('is-dragging');
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!dragging) return;
+    const dx = event.clientX - lastX;
+    const dy = event.clientY - lastY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+    yaw += dx * .004;
+    pitch = Math.max(-.9, Math.min(.9, pitch + dy * .003));
+    lastX = event.clientX;
+    lastY = event.clientY;
+  });
+  canvas.addEventListener('pointerup', (event) => {
+    dragging = false;
+    canvas.classList.remove('is-dragging');
+    canvas.releasePointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('click', (event) => {
+    if (moved) return;
+    const hit = projectedBodies.find(({ x, y, body, scale }) => {
+      const radius = Math.max(8, body.radius * Math.min(1.35, scale / (Math.min(width, height) * .34)));
+      return Math.hypot(event.clientX - x, event.clientY - y) < radius + 16;
+    });
+    if (hit) focusWorld(hit.body.key);
+  });
+  document.querySelectorAll('[data-world]').forEach((tag) => {
+    tag.addEventListener('click', () => focusWorld(tag.dataset.world));
+  });
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(draw);
+}
+
+initSpaceScene();
 refreshUsbDevices();
 refreshSerialDevices();

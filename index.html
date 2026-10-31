@@ -3,102 +3,90 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b0f17" />
-    <meta
-      name="description"
-      content="GOHO Lab — U 模块、VST 插件、小软件、在线烧录与 Serial Monitor。"
-    />
-    <title>GOHO University · Hardware Tools</title>
+    <meta name="theme-color" content="#050711" />
+    <meta name="description" content="GOHO University — Tools for Noise: Eurorack, FX pedal, VST, Max/MSP, macOS app and browser hardware tools." />
+    <title>GOHO University · Tools for Noise</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="shell">
+    <div class="space-app">
+      <canvas id="spaceCanvas" aria-hidden="true"></canvas>
+      <div class="star-wash" aria-hidden="true"></div>
+
       <header class="topbar">
-        <a class="brand" href="#top" aria-label="GOHO Lab home">
+        <a class="brand" href="#top" aria-label="GOHO University home">
           <span class="brand-mark cat-logo"><img src="./cat-logo.svg" alt="GOHO cat logo" width="35" height="35" /></span>
-          <span>
+          <span class="brand-copy">
             <strong>GOHO UNIVERSITY</strong>
             <small>Tools for Noise</small>
           </span>
         </a>
         <nav class="nav" aria-label="Main navigation">
-          <a href="#tools">Tools</a>
-          <a href="#products">Products</a>
-          <a href="#serial">Serial Monitor</a>
+          <a href="#tools">Device bridge</a>
+          <a href="#products">Worlds</a>
+          <a href="#serial">Serial monitor</a>
         </nav>
-        <span class="status-pill"><i></i> Browser tools ready</span>
+        <span class="status-pill"><i></i> IN FLIGHT</span>
       </header>
 
-      <main id="top">
-        <section class="hero">
+      <main id="top" class="universe">
+        <section class="hero-orbit" aria-labelledby="hero-title">
           <div class="hero-copy">
-            <p class="eyebrow">U MODULES · VST · SOFTWARE · ONLINE TOOLS</p>
-            <h1>让硬件工作流<br /><em>直接发生在浏览器里。</em></h1>
-            <p class="hero-text">
-              一个面向 GOHO University 产品的实验性入口：从固件烧录到串口调试，先把最常用的工具放到手边。
-            </p>
+            <p class="eyebrow">PARALLEL SPACE / AUDIO SYSTEMS</p>
+            <h1 id="hero-title">让硬件工作流<br /><em>直接发生在浏览器里</em></h1>
+            <p class="hero-text">GOHO University 是一个持续航行中的工具舱。拖动屏幕转向，在不同世界之间切换。</p>
             <div class="hero-actions">
-              <a class="button button-primary" href="#tools">打开工具 <span>↓</span></a>
-              <a class="button button-ghost" href="#products">查看产品</a>
+              <a class="button button-primary" href="#tools">进入设备舱 <span>↓</span></a>
+              <a class="button button-ghost" href="#products">浏览世界</a>
             </div>
           </div>
-          <div class="hero-console" aria-label="Device status preview">
-            <div class="console-top"><span>GOHO / DEVICE BRIDGE</span><span>01</span></div>
-            <div class="waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-            <div class="console-readout"><strong>READY</strong><span>USB / SERIAL / WEB</span></div>
-            <div class="console-grid"><span>DFU</span><span>USB</span><span>UART</span><span>VST</span></div>
+          <div class="hero-instrument" aria-label="Flight instrument">
+            <span class="instrument-orbit orbit-a"></span>
+            <span class="instrument-orbit orbit-b"></span>
+            <span class="instrument-core"><img src="./cat-logo.svg" alt="" width="74" height="74" /></span>
+            <div class="instrument-readout"><span>GOHO / FLIGHT DECK</span><strong>∞</strong><small>DRAG TO TURN · CLICK A WORLD</small></div>
           </div>
+          <div class="world-hint" aria-hidden="true"><span>←</span> TURN THE SHIP <span>→</span></div>
         </section>
 
-        <section class="section" id="tools">
-          <div class="section-heading">
-            <div><p class="eyebrow">FIRST BUILD</p><h2>在线工具</h2></div>
-            <p>无需安装，支持设备直连。当前版本优先验证浏览器端硬件访问链路。</p>
+        <section class="tool-bay" id="tools" aria-labelledby="tools-title">
+          <div class="section-heading section-heading-wide">
+            <div><p class="eyebrow">DEVICE BRIDGE</p><h2 id="tools-title">两条直达航线</h2></div>
+            <p>选择设备，加载固件，或者打开串口监测。其余的交给浏览器。</p>
           </div>
-          <div class="tool-grid">
-            <article class="tool-card tool-card-featured">
-              <div class="card-index">01 / DFU</div>
-              <div class="card-icon">↥</div>
-              <h3>在线 DFU 烧录</h3>
-              <p>通过 WebUSB 选择设备并准备固件。DFU 协议和设备型号适配将在下一步接入。</p>
-              <div class="device-picker">
-                <div class="picker-head"><span>USB 设备列表</span><button class="text-button" id="refreshUsb" type="button">刷新</button></div>
-                <select id="usbDeviceSelect" aria-label="USB device list">
-                  <option value="">尚未发现已授权的 USB 设备</option>
-                </select>
-                <small>浏览器只会列出已授权设备；首次使用请点击“选择设备”。</small>
-              </div>
+
+          <div class="tool-orbit">
+            <article class="world-panel world-panel-dfu" aria-labelledby="dfu-title">
+              <div class="panel-signal"><span></span> WORLD / DFU</div>
+              <div class="panel-icon">↥</div>
+              <h3 id="dfu-title">在线 DFU 烧录</h3>
+              <p>把固件送进设备的内部 Flash。</p>
               <div class="firmware-picker">
                 <input id="firmwareFile" type="file" accept=".bin,.hex,.BIN,.HEX" hidden />
                 <label class="button button-secondary" for="firmwareFile">选择 BIN / HEX 固件</label>
                 <span id="firmwareName">尚未选择文件</span>
               </div>
-              <div class="card-actions">
+              <div class="panel-actions">
                 <button class="button button-primary" id="dfuButton" type="button">选择 DFU 设备</button>
                 <button class="button button-secondary" id="flashButton" type="button" disabled>开始烧录</button>
-                <progress id="flashProgress" value="0" max="100" hidden></progress>
-                <span class="card-status" id="dfuStatus">等待设备和固件</span>
               </div>
+              <progress id="flashProgress" value="0" max="100" hidden></progress>
+              <span class="card-status" id="dfuStatus">等待设备和固件</span>
             </article>
-            <article class="tool-card" id="serial">
-              <div class="card-index">02 / UART</div>
-              <div class="card-icon">⌁</div>
-              <h3>Serial Monitor</h3>
-              <p>使用 Web Serial 连接串口，实时查看设备输出并发送调试指令。</p>
-              <div class="device-picker">
-                <div class="picker-head"><span>CDC / Serial 设备列表</span><button class="text-button" id="refreshSerial" type="button">刷新</button></div>
-                <select id="serialDeviceSelect" aria-label="Serial device list">
-                  <option value="">尚未发现已授权的串口设备</option>
-                </select>
-                <small>这里显示浏览器已授权的 CDC/串口设备；首次使用请点击“选择串口”。</small>
-              </div>
+
+            <article class="world-panel world-panel-serial" id="serial" aria-labelledby="serial-title">
+              <div class="panel-signal"><span></span> WORLD / CDC</div>
+              <div class="panel-icon">⌁</div>
+              <h3 id="serial-title">Serial Monitor</h3>
+              <p>连接 CDC 设备，实时查看输出并发送调试指令。</p>
               <div class="serial-controls">
                 <label>Baud rate <select id="baudRate"><option>115200</option><option>57600</option><option>38400</option><option>9600</option></select></label>
-                <button class="button button-secondary" id="serialButton" type="button">弹窗选择串口</button>
+                <button class="button button-secondary" id="serialButton" type="button">选择 CDC 设备</button>
               </div>
               <span class="card-status" id="serialStatus">尚未连接</span>
             </article>
           </div>
+
           <div class="monitor" id="monitorPanel" hidden>
             <div class="monitor-header">
               <span>LIVE SERIAL OUTPUT <strong id="monitorState">STOPPED</strong></span>
@@ -119,21 +107,23 @@
           </div>
         </section>
 
-        <section class="section products-section" id="products">
+        <section class="worlds-section" id="products" aria-labelledby="worlds-title">
           <div class="section-heading">
-            <div><p class="eyebrow">GOHO ECOSYSTEM</p><h2>产品方向</h2></div>
-            <p>从模块、插件到配套软件，逐步把开发和使用体验连成一条线。</p>
+            <div><p class="eyebrow">PARALLEL WORLDS</p><h2 id="worlds-title">不同的世界 同一条航线</h2></div>
+            <p>拖动视野，点击星体。每一个名字都是 GOHO University 的一个入口。</p>
           </div>
-          <div class="product-grid">
-            <div class="product-item"><span>01</span><h3>U Modules</h3><p>可扩展的声音硬件模块</p></div>
-            <div class="product-item"><span>02</span><h3>VST Plugins</h3><p>把硬件灵感带进 DAW</p></div>
-            <div class="product-item"><span>03</span><h3>Small Software</h3><p>轻量、直接、可组合</p></div>
-            <div class="product-item"><span>04</span><h3>Web Tools</h3><p>烧录、检测与开发辅助</p></div>
+          <div class="world-list">
+            <a class="world-tag world-tag-eurorack" href="#tools" data-world="eurorack"><b>Eurorack</b><span>modular sound</span></a>
+            <a class="world-tag world-tag-fx" href="#tools" data-world="fx"><b>FX Pedal</b><span>signal distortion</span></a>
+            <a class="world-tag world-tag-vst" href="#tools" data-world="vst"><b>VST</b><span>inside the DAW</span></a>
+            <a class="world-tag world-tag-max" href="#tools" data-world="max"><b>Max/MSP App</b><span>patches in motion</span></a>
+            <a class="world-tag world-tag-macos" href="#tools" data-world="macos"><b>macOS App</b><span>desktop instruments</span></a>
+            <a class="world-tag world-tag-tools" href="#tools" data-world="tools"><b>Online Tools</b><span>device bridge</span></a>
           </div>
         </section>
       </main>
 
-      <footer class="footer"><span>© 2026 GOHO UNIVERSITY</span><span>Prototype / v0.1</span></footer>
+      <footer class="footer"><span>© 2026 GOHO UNIVERSITY</span><span>PARALLEL SPACE / v0.2</span></footer>
     </div>
     <script src="./app.js" type="module"></script>
   </body>
