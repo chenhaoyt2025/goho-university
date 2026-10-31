@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 96" fill="none" aria-labelledby="title desc" role="img">
+  <title id="title">GOHO cat logo</title>
+  <desc id="desc">A simple hand-drawn cat head with whiskers</desc>
+  <g stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 25C39 11 81 11 94 25" />
+    <path d="M16 38C12 56 17 75 32 84C47 93 73 93 88 84C103 75 108 56 104 38" />
+    <ellipse cx="38" cy="42" rx="10" ry="12" />
+    <ellipse cx="82" cy="42" rx="10" ry="12" />
+    <ellipse cx="38" cy="42" rx="3.8" ry="6" fill="currentColor" stroke="none" />
+    <ellipse cx="82" cy="42" rx="3.8" ry="6" fill="currentColor" stroke="none" />
+    <path d="M54 51C58 46 62 46 66 51C64 56 56 56 54 51Z" fill="currentColor" />
+    <path d="M60 56V67M60 67L51 74M60 67L69 74" />
+    <path d="M26 59L5 62M28 66L8 74M30 73L15 86M94 59L115 62M92 66L112 74M90 73L105 86" />
+  </g>
+</svg>
