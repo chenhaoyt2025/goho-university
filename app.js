@@ -508,18 +508,23 @@ serialButton.addEventListener('click', async () => {
       }
       await serialPort.close();
       serialPort = undefined;
-      serialButton.textContent = '选择串口';
+      serialButton.textContent = '弹窗选择串口';
       serialStatus.textContent = '已断开';
       return;
     }
-    const selectedIndex = serialDeviceSelect.value;
-    serialPort = selectedIndex === '' ? await navigator.serial.requestPort() : serialPorts[Number(selectedIndex)];
+    // Always open the browser chooser so the user explicitly selects the device.
+    // Do not silently open the first previously-authorized port from the list.
+    serialPort = await navigator.serial.requestPort();
     await serialPort.open({ baudRate: Number(baudRate.value) });
     serialWriter = serialPort.writable.getWriter();
     monitorPanel.hidden = false;
     serialButton.textContent = '断开串口';
-    serialStatus.textContent = `已连接：${portName(serialPort)}`;
-    addMessage(`串口已连接，波特率 ${baudRate.value}`);
+    const selectedPortInfo = serialPort.getInfo();
+    const usbId = selectedPortInfo.usbVendorId && selectedPortInfo.usbProductId
+      ? ` · USB ${selectedPortInfo.usbVendorId.toString(16).padStart(4, '0')}:${selectedPortInfo.usbProductId.toString(16).padStart(4, '0')}`
+      : '';
+    serialStatus.textContent = `已连接：${portName(serialPort)}${usbId}，等待数据`;
+    addMessage(`串口已连接：${portName(serialPort)}${usbId}，波特率 ${baudRate.value}`);
     readSerial();
   } catch (error) {
     serialStatus.textContent = error.name === 'NotFoundError' ? '未选择设备' : `连接失败：${error.message}`;

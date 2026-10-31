@@ -69,7 +69,7 @@
                 <small>浏览器只会列出已授权设备；首次使用请点击“选择设备”。</small>
               </div>
               <div class="firmware-picker">
-                <input id="firmwareFile" type="file" hidden />
+                <input id="firmwareFile" type="file" accept=".bin,.hex,.BIN,.HEX" hidden />
                 <label class="button button-secondary" for="firmwareFile">选择 BIN / HEX 固件</label>
                 <span id="firmwareName">尚未选择文件</span>
               </div>
@@ -94,7 +94,7 @@
               </div>
               <div class="serial-controls">
                 <label>Baud rate <select id="baudRate"><option>115200</option><option>57600</option><option>38400</option><option>9600</option></select></label>
-                <button class="button button-secondary" id="serialButton" type="button">选择串口</button>
+                <button class="button button-secondary" id="serialButton" type="button">弹窗选择串口</button>
               </div>
               <span class="card-status" id="serialStatus">尚未连接</span>
             </article>
