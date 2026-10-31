@@ -1,5 +1,6 @@
 const dfuButton = document.querySelector('#dfuButton');
 const flashButton = document.querySelector('#flashButton');
+const flashProgress = document.querySelector('#flashProgress');
 const dfuStatus = document.querySelector('#dfuStatus');
 const usbDeviceSelect = document.querySelector('#usbDeviceSelect');
 const refreshUsb = document.querySelector('#refreshUsb');
@@ -22,6 +23,25 @@ const lineEnding = document.querySelector('#lineEnding');
 const sendInput = document.querySelector('#sendInput');
 const baudRate = document.querySelector('#baudRate');
 
+const DFU = {
+  DNLOAD: 0x01,
+  GETSTATUS: 0x03,
+  CLRSTATUS: 0x04,
+  ABORT: 0x06,
+  SET_ADDRESS: 0x21,
+  ERASE_SECTOR: 0x41,
+  STATE_IDLE: 2,
+  STATE_DNLOAD_SYNC: 3,
+  STATE_DNBUSY: 4,
+  STATE_DNLOAD_IDLE: 5,
+  STATE_MANIFEST: 7,
+  STATE_MANIFEST_WAIT_RESET: 8,
+  STATE_ERROR: 10,
+};
+const DFU_TRANSFER_SIZE = 2048;
+const STM32_FLASH_START = 0x08000000;
+const STM32_H7_SECTOR_SIZE = 128 * 1024;
+
 let usbDevices = [];
 let serialPorts = [];
 let selectedUsbDevice;
@@ -31,6 +51,7 @@ let serialWriter;
 let serialReader;
 let monitorRunning = false;
 let receivedChunks = [];
+let flashing = false;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -54,7 +75,7 @@ function portName(port) {
 }
 
 function updateFlashButton() {
-  flashButton.disabled = !(selectedUsbDevice && selectedFirmware);
+  flashButton.disabled = flashing || !(selectedUsbDevice && selectedFirmware);
 }
 
 function refreshLog() {
@@ -73,10 +94,7 @@ function refreshLog() {
 }
 
 function addMessage(message) {
-  receivedChunks.push({
-    time: new Date().toLocaleTimeString(),
-    message,
-  });
+  receivedChunks.push({ time: new Date().toLocaleTimeString(), message });
   refreshLog();
 }
 
@@ -159,14 +177,225 @@ dfuButton.addEventListener('click', async () => {
   }
 });
 
-flashButton.addEventListener('click', async () => {
-  if (!selectedUsbDevice || !selectedFirmware) return;
-  dfuStatus.textContent = `已准备 ${selectedFirmware.name}（${formatBytes(selectedFirmware.size)}）`;
-  // The transfer step must be matched to the U module's VID/PID and DFU protocol.
-  // Do not send arbitrary bytes to an unknown USB device.
-  dfuStatus.textContent = '文件和设备已准备；DFU 传输协议待按设备型号接入';
-});
+function parseIntelHex(text) {
+  const records = [];
+  let upperAddress = 0;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (!line.startsWith(':')) throw new Error('HEX 文件格式错误');
+    const bytes = Uint8Array.from(line.slice(1).match(/../g) || [], (pair) => Number.parseInt(pair, 16));
+    const length = bytes[0];
+    const address = (bytes[1] << 8) | bytes[2];
+    const type = bytes[3];
+    if (bytes.length < length + 5) throw new Error('HEX 文件记录长度错误');
+    if (type === 0x00) records.push({ address: upperAddress + address, data: bytes.slice(4, 4 + length) });
+    if (type === 0x01) break;
+    if (type === 0x04) upperAddress = ((bytes[4] << 8) | bytes[5]) << 16;
+  }
+  if (!records.length) throw new Error('HEX 文件没有固件数据');
+  const start = Math.min(...records.map((record) => record.address));
+  const end = Math.max(...records.map((record) => record.address + record.data.length));
+  const image = new Uint8Array(end - start).fill(0xff);
+  for (const record of records) image.set(record.data, record.address - start);
+  return { data: image, address: start };
+}
 
+async function loadFirmwareImage(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (file.name.toLowerCase().endsWith('.hex')) {
+    return parseIntelHex(new TextDecoder().decode(bytes));
+  }
+  return { data: bytes, address: STM32_FLASH_START };
+}
+
+function findDfuInterface(device) {
+  for (const configuration of device.configurations) {
+    for (const intf of configuration.interfaces) {
+      for (const alternate of intf.alternates) {
+        if (alternate.interfaceClass === 0xfe && alternate.interfaceSubclass === 0x01 && [0x01, 0x02].includes(alternate.interfaceProtocol)) {
+          return { configuration, intf, alternate };
+        }
+      }
+    }
+  }
+  throw new Error('没有找到标准 DFU 接口；请确认设备已经进入 DFU 模式');
+}
+
+async function openDfuDevice(device) {
+  const settings = findDfuInterface(device);
+  await device.open();
+  if (!device.configuration || device.configuration.configurationValue !== settings.configuration.configurationValue) {
+    await device.selectConfiguration(settings.configuration.configurationValue);
+  }
+  await device.claimInterface(settings.intf.interfaceNumber);
+  if (settings.alternate.alternateSetting !== 0) {
+    await device.selectAlternateInterface(settings.intf.interfaceNumber, settings.alternate.alternateSetting);
+  }
+  return settings;
+}
+
+async function dfuOut(device, intfNumber, request, value = 0, data) {
+  const setup = { requestType: 'class', recipient: 'interface', request, value, index: intfNumber };
+  const result = data === undefined ? await device.controlTransferOut(setup) : await device.controlTransferOut(setup, data);
+  if (result.status !== 'ok') throw new Error(`DFU OUT 失败：${result.status}`);
+  return result.bytesWritten;
+}
+
+async function dfuIn(device, intfNumber, request, length, value = 0) {
+  const result = await device.controlTransferIn({ requestType: 'class', recipient: 'interface', request, value, index: intfNumber }, length);
+  if (result.status !== 'ok') throw new Error(`DFU IN 失败：${result.status}`);
+  return result.data;
+}
+
+async function getDfuStatus(device, intfNumber) {
+  const data = await dfuIn(device, intfNumber, DFU.GETSTATUS, 6);
+  return {
+    status: data.getUint8(0),
+    pollTimeout: data.getUint8(1) | (data.getUint8(2) << 8) | (data.getUint8(3) << 16),
+    state: data.getUint8(4),
+  };
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function pollDfu(device, intfNumber, predicate) {
+  let status = await getDfuStatus(device, intfNumber);
+  let guard = 0;
+  while (!predicate(status.state)) {
+    if (status.state === DFU.STATE_ERROR) throw new Error(`DFU 返回错误状态，status=${status.status}`);
+    await sleep(Math.max(status.pollTimeout, 10));
+    status = await getDfuStatus(device, intfNumber);
+    if (++guard > 1200) throw new Error('DFU 等待超时');
+  }
+  if (status.status !== 0) throw new Error(`DFU 错误码：${status.status}`);
+  return status;
+}
+
+async function ensureDfuIdle(device, intfNumber) {
+  let status = await getDfuStatus(device, intfNumber);
+  if (status.state === DFU.STATE_ERROR) {
+    await dfuOut(device, intfNumber, DFU.CLRSTATUS);
+    status = await getDfuStatus(device, intfNumber);
+  }
+  if (status.state !== DFU.STATE_IDLE) {
+    await dfuOut(device, intfNumber, DFU.ABORT);
+    status = await getDfuStatus(device, intfNumber);
+  }
+  if (status.state !== DFU.STATE_IDLE) throw new Error(`设备无法进入 DFU_IDLE，state=${status.state}`);
+}
+
+async function dfuseCommand(device, intfNumber, command, parameter) {
+  const payload = new Uint8Array(command === DFU.SET_ADDRESS || command === DFU.ERASE_SECTOR ? 5 : 2);
+  payload[0] = command;
+  if (payload.length === 5) new DataView(payload.buffer).setUint32(1, parameter, true);
+  else payload[1] = parameter;
+  await dfuOut(device, intfNumber, DFU.DNLOAD, 0, payload);
+  await pollDfu(device, intfNumber, (state) => state !== DFU.STATE_DNBUSY);
+}
+
+function parseMemoryDescriptor(descriptor) {
+  if (!descriptor) return [];
+  const segments = [];
+  const sectionPattern = /\/\s*(0x[0-9a-f]+)\s*\/([^/]+)/gi;
+  for (const match of descriptor.matchAll(sectionPattern)) {
+    let address = Number.parseInt(match[1], 16);
+    for (const item of match[2].split(',')) {
+      const sector = item.trim().match(/(\d+)\s*\*\s*(\d+)\s*([BKMG])\s*([a-g])/i);
+      if (!sector) continue;
+      const multiplier = { B: 1, K: 1024, M: 1024 * 1024, G: 1024 * 1024 * 1024 }[sector[3].toUpperCase()];
+      const count = Number(sector[1]);
+      const size = Number(sector[2]) * multiplier;
+      const properties = sector[4].toLowerCase().charCodeAt(0) - 96;
+      segments.push({ start: address, end: address + count * size, size, erasable: Boolean(properties & 2) });
+      address += count * size;
+    }
+  }
+  return segments;
+}
+
+function sectorStart(address, segment) {
+  return segment.start + Math.floor((address - segment.start) / segment.size) * segment.size;
+}
+
+async function eraseDfuMemory(device, intfNumber, address, length, descriptor) {
+  const parsed = parseMemoryDescriptor(descriptor);
+  const segments = parsed.length ? parsed : [{ start: STM32_FLASH_START, end: address + length, size: STM32_H7_SECTOR_SIZE, erasable: true }];
+  const endAddress = address + length;
+  let current = address;
+  let erased = 0;
+  while (current < endAddress) {
+    const segment = segments.find((item) => item.start <= current && current < item.end);
+    if (!segment) throw new Error(`固件地址 0x${current.toString(16)} 不在设备 Flash 范围内`);
+    const start = sectorStart(current, segment);
+    if (segment.erasable) {
+      await dfuseCommand(device, intfNumber, DFU.ERASE_SECTOR, start);
+    }
+    current = Math.min(segment.end, start + segment.size);
+    erased = Math.min(length, current - address);
+    flashProgress.value = Math.round((erased / length) * 20);
+    dfuStatus.textContent = `正在擦除 Flash：${Math.round((erased / length) * 100)}%`;
+  }
+}
+
+async function flashDfu() {
+  if (!selectedUsbDevice || !selectedFirmware || flashing) return;
+  flashing = true;
+  updateFlashButton();
+  flashProgress.hidden = false;
+  flashProgress.value = 0;
+  let deviceOpened = false;
+  try {
+    const image = await loadFirmwareImage(selectedFirmware);
+    const settings = await openDfuDevice(selectedUsbDevice);
+    deviceOpened = true;
+    const intfNumber = settings.intf.interfaceNumber;
+    await ensureDfuIdle(selectedUsbDevice, intfNumber);
+    const protocol = settings.alternate.interfaceProtocol;
+    if (protocol === 0x02) {
+      await eraseDfuMemory(selectedUsbDevice, intfNumber, image.address, image.data.length, settings.alternate.interfaceName);
+      let sent = 0;
+      while (sent < image.data.length) {
+        const chunk = image.data.slice(sent, sent + DFU_TRANSFER_SIZE);
+        await dfuseCommand(selectedUsbDevice, intfNumber, DFU.SET_ADDRESS, image.address + sent);
+        await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, 2, chunk);
+        await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_DNLOAD_IDLE);
+        sent += chunk.length;
+        flashProgress.value = 20 + Math.round((sent / image.data.length) * 75);
+        dfuStatus.textContent = `正在写入固件：${Math.round((sent / image.data.length) * 100)}%`;
+      }
+      await dfuseCommand(selectedUsbDevice, intfNumber, DFU.SET_ADDRESS, image.address);
+      await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, 0, new Uint8Array());
+      await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_MANIFEST || state === DFU.STATE_MANIFEST_WAIT_RESET || state === DFU.STATE_IDLE);
+    } else {
+      let sent = 0;
+      let block = 0;
+      while (sent < image.data.length) {
+        const chunk = image.data.slice(sent, sent + DFU_TRANSFER_SIZE);
+        await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, block++, chunk);
+        await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_DNLOAD_IDLE);
+        sent += chunk.length;
+        flashProgress.value = Math.round((sent / image.data.length) * 95);
+        dfuStatus.textContent = `正在写入固件：${Math.round((sent / image.data.length) * 100)}%`;
+      }
+      await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, block, new Uint8Array());
+      await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_MANIFEST || state === DFU.STATE_MANIFEST_WAIT_RESET || state === DFU.STATE_IDLE);
+    }
+    flashProgress.value = 100;
+    dfuStatus.textContent = '烧录完成，设备正在重启';
+  } catch (error) {
+    dfuStatus.textContent = `烧录失败：${error.message || error}`;
+    flashProgress.value = 0;
+  } finally {
+    if (deviceOpened) {
+      try { await selectedUsbDevice.close(); } catch { /* device may reboot after manifestation */ }
+    }
+    flashing = false;
+    updateFlashButton();
+  }
+}
+
+flashButton.addEventListener('click', flashDfu);
 refreshUsb.addEventListener('click', () => refreshUsbDevices().catch((error) => {
   dfuStatus.textContent = `刷新失败：${error.message}`;
 }));
@@ -263,9 +492,7 @@ sendForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!serialWriter || !sendInput.value) return;
   try {
-    let bytes = sendFormat.value === 'hex'
-      ? parseHex(sendInput.value)
-      : new TextEncoder().encode(sendInput.value);
+    let bytes = sendFormat.value === 'hex' ? parseHex(sendInput.value) : new TextEncoder().encode(sendInput.value);
     bytes = appendLineEnding(bytes);
     await serialWriter.write(bytes);
     addBytes('>', bytes);

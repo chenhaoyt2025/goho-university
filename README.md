@@ -5,10 +5,10 @@ GOHO University 产品与在线硬件工具的第一版静态网页原型。
 ## 当前内容
 
 - 产品入口页：U Modules、VST Plugins、Small Software、Web Tools
-- WebUSB 授权设备列表、固件文件选择、DFU 烧录流程入口
+- WebUSB 授权设备列表、固件文件选择、STM32 DfuSe DFU 烧录
 - Web Serial 授权 CDC/串口设备列表、Start/Stop、TXT/HEX 接收与发送、LF/CRLF 行尾
 
-> 当前 DFU 页面已经完成“选择设备 + 选择固件”的交互。真正的固件传输需要根据 U 模块的 VID/PID、DFU 接口和固件协议接入，避免向未知 USB 设备发送错误数据。
+> DFU 当前按项目现有 `dfu-util -a 0 -s 0x08000000:leave -D ...` 流程实现：支持 STM32 DfuSe 接口、Flash 擦除、分块写入、HEX 地址记录和完成后重启。实际硬件仍需连接测试；如果设备不是 STM32 DfuSe，需要单独适配协议。
 
 ## 本地预览
 
