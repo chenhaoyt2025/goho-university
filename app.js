@@ -38,7 +38,7 @@ const DFU = {
   STATE_MANIFEST_WAIT_RESET: 8,
   STATE_ERROR: 10,
 };
-const DFU_TRANSFER_SIZE = 2048;
+const DEFAULT_DFU_TRANSFER_SIZE = 1024;
 const STM32_FLASH_START = 0x08000000;
 const STM32_H7_SECTOR_SIZE = 128 * 1024;
 
@@ -219,15 +219,19 @@ async function loadFirmwareImage(file) {
 }
 
 function findDfuInterface(device) {
+  const matches = [];
   for (const configuration of device.configurations) {
     for (const intf of configuration.interfaces) {
       for (const alternate of intf.alternates) {
         if (alternate.interfaceClass === 0xfe && alternate.interfaceSubclass === 0x01 && [0x01, 0x02].includes(alternate.interfaceProtocol)) {
-          return { configuration, intf, alternate };
+          matches.push({ configuration, intf, alternate });
         }
       }
     }
   }
+  const internalFlash = matches.find(({ alternate }) => (alternate.interfaceName || '').includes('0x08000000'));
+  if (internalFlash) return internalFlash;
+  if (matches.length) return matches[0];
   throw new Error('没有找到标准 DFU 接口；请确认设备已经进入 DFU 模式');
 }
 
@@ -264,6 +268,32 @@ async function getDfuStatus(device, intfNumber) {
     pollTimeout: data.getUint8(1) | (data.getUint8(2) << 8) | (data.getUint8(3) << 16),
     state: data.getUint8(4),
   };
+}
+
+async function readDfuFunctionalDescriptor(device) {
+  const getDescriptor = { requestType: 'standard', recipient: 'device', request: 0x06, value: 0x0200, index: 0 };
+  const header = await device.controlTransferIn(getDescriptor, 4);
+  if (header.status !== 'ok') return null;
+  const totalLength = header.data.getUint16(2, true);
+  const result = await device.controlTransferIn(getDescriptor, totalLength);
+  if (result.status !== 'ok') return null;
+  const data = new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
+  for (let offset = 0; offset + 2 <= data.length;) {
+    const length = data[offset];
+    const type = data[offset + 1];
+    if (!length || offset + length > data.length) break;
+    if (type === 0x21 && length >= 9) {
+      return {
+        attributes: data[offset + 2],
+        manifestationTolerant: Boolean(data[offset + 2] & 0x04),
+        canDownload: Boolean(data[offset + 2] & 0x01),
+        transferSize: data[offset + 5] | (data[offset + 6] << 8),
+        version: data[offset + 7] | (data[offset + 8] << 8),
+      };
+    }
+    offset += length;
+  }
+  return null;
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -360,12 +390,19 @@ async function flashDfu() {
     deviceOpened = true;
     const intfNumber = settings.intf.interfaceNumber;
     await ensureDfuIdle(selectedUsbDevice, intfNumber);
+    const descriptor = await readDfuFunctionalDescriptor(selectedUsbDevice);
+    const transferSize = descriptor?.transferSize || DEFAULT_DFU_TRANSFER_SIZE;
+    if (descriptor && !descriptor.canDownload) throw new Error('DFU 设备不支持下载');
+    const manifestationTolerant = descriptor?.manifestationTolerant ?? true;
     const protocol = settings.alternate.interfaceProtocol;
+    dfuStatus.textContent = `已连接 DFU 接口：${settings.alternate.interfaceName || '未命名'}，传输块 ${transferSize} 字节`;
     if (protocol === 0x02) {
       await eraseDfuMemory(selectedUsbDevice, intfNumber, image.address, image.data.length, settings.alternate.interfaceName);
+      dfuStatus.textContent = '擦除完成，开始写入固件';
       let sent = 0;
       while (sent < image.data.length) {
-        const chunk = image.data.slice(sent, sent + DFU_TRANSFER_SIZE);
+        const chunk = image.data.slice(sent, sent + transferSize);
+        dfuStatus.textContent = `正在写入固件：${Math.round((sent / image.data.length) * 100)}%（第 ${Math.floor(sent / transferSize) + 1} 块）`;
         await dfuseCommand(selectedUsbDevice, intfNumber, DFU.SET_ADDRESS, image.address + sent);
         await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, 2, chunk);
         await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_DNLOAD_IDLE);
@@ -375,12 +412,21 @@ async function flashDfu() {
       }
       await dfuseCommand(selectedUsbDevice, intfNumber, DFU.SET_ADDRESS, image.address);
       await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, 0, new Uint8Array());
-      await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_MANIFEST || state === DFU.STATE_MANIFEST_WAIT_RESET || state === DFU.STATE_IDLE);
+      if (manifestationTolerant) {
+        try {
+          await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_MANIFEST || state === DFU.STATE_MANIFEST_WAIT_RESET || state === DFU.STATE_IDLE);
+        } catch (error) {
+          if (!String(error).match(/NotFound|unavailable|disconnected/i)) throw error;
+        }
+      } else {
+        dfuStatus.textContent = '等待设备重启';
+      }
     } else {
       let sent = 0;
       let block = 0;
       while (sent < image.data.length) {
-        const chunk = image.data.slice(sent, sent + DFU_TRANSFER_SIZE);
+        const chunk = image.data.slice(sent, sent + transferSize);
+        dfuStatus.textContent = `正在写入固件：${Math.round((sent / image.data.length) * 100)}%（第 ${block + 1} 块）`;
         await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, block++, chunk);
         await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_DNLOAD_IDLE);
         sent += chunk.length;
@@ -388,7 +434,13 @@ async function flashDfu() {
         dfuStatus.textContent = `正在写入固件：${Math.round((sent / image.data.length) * 100)}%`;
       }
       await dfuOut(selectedUsbDevice, intfNumber, DFU.DNLOAD, block, new Uint8Array());
-      await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_MANIFEST || state === DFU.STATE_MANIFEST_WAIT_RESET || state === DFU.STATE_IDLE);
+      if (manifestationTolerant) {
+        try {
+          await pollDfu(selectedUsbDevice, intfNumber, (state) => state === DFU.STATE_MANIFEST || state === DFU.STATE_MANIFEST_WAIT_RESET || state === DFU.STATE_IDLE);
+        } catch (error) {
+          if (!String(error).match(/NotFound|unavailable|disconnected/i)) throw error;
+        }
+      }
     }
     flashProgress.value = 100;
     dfuStatus.textContent = '烧录完成，设备正在重启';
