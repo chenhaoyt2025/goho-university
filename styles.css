@@ -19,6 +19,7 @@
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); font-family: var(--sans); }
+body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 body, button, input, select { font: inherit; }
 a { color: inherit; text-decoration: none; }
 button, label, select, a { -webkit-tap-highlight-color: transparent; }
@@ -70,6 +71,12 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .button-ghost:hover { color: var(--text); }
 
 .hero-instrument { position: relative; min-height: 430px; display: grid; place-items: center; transform: translateY(-10px); }
+.flight-reticle { position: relative; width: min(46vw, 420px); aspect-ratio: 1; border: 1px solid rgba(119, 231, 255, .16); border-radius: 50%; opacity: .82; box-shadow: 0 0 80px rgba(119, 231, 255, .08), inset 0 0 70px rgba(168, 139, 255, .08); }
+.flight-reticle::before, .flight-reticle::after, .flight-reticle i, .flight-reticle b { position: absolute; content: ''; display: block; background: rgba(119, 231, 255, .48); }
+.flight-reticle::before { left: 50%; top: 5%; width: 1px; height: 90%; }
+.flight-reticle::after { left: 5%; top: 50%; width: 90%; height: 1px; }
+.flight-reticle i { left: 50%; top: 50%; width: 16px; height: 16px; border: 1px solid var(--cyan); border-radius: 50%; background: transparent; transform: translate(-50%, -50%); box-shadow: 0 0 20px var(--cyan); }
+.flight-reticle b { left: 50%; top: 50%; width: 1px; height: 60%; background: linear-gradient(transparent, rgba(251, 141, 202, .7), transparent); transform: translate(-50%, -50%) rotate(45deg); }
 .instrument-core { position: relative; z-index: 2; display: grid; place-items: center; width: 144px; height: 144px; border: 1px solid rgba(177, 206, 255, .6); border-radius: 50%; background: radial-gradient(circle at 38% 28%, rgba(255, 255, 255, .25), rgba(74, 83, 166, .28) 30%, rgba(17, 20, 60, .7) 68%, rgba(8, 9, 23, .8)); box-shadow: 0 0 34px rgba(129, 115, 255, .6), inset 0 0 38px rgba(114, 220, 255, .19); }
 .instrument-core::before, .instrument-core::after { position: absolute; content: ''; border: 1px solid rgba(119, 231, 255, .36); border-radius: 50%; transform: rotate(-25deg); }
 .instrument-core::before { width: 230px; height: 70px; }
@@ -149,6 +156,7 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
   .hero-orbit { grid-template-columns: 1fr; min-height: 0; padding: 75px 0 90px; }
   .hero-copy { max-width: 600px; }
   .hero-instrument { min-height: 350px; margin-top: 20px; }
+  .flight-reticle { width: min(70vw, 390px); }
   .instrument-readout { right: 13%; bottom: 0; }
   .tool-orbit { grid-template-columns: 1fr; gap: 30px; }
   .world-panel-dfu, .world-panel-serial { transform: none; }
@@ -169,6 +177,7 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
   .status-pill { display: none; }
   h1 { font-size: clamp(2.7rem, 13vw, 4.4rem); }
   .hero-instrument { min-height: 280px; transform: scale(.83); }
+  .flight-reticle { width: 82vw; }
   .section-heading { display: block; }
   .section-heading > p { margin-top: 16px; }
   .world-panel { padding: 24px 20px; }

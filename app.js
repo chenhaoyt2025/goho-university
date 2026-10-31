@@ -896,15 +896,19 @@ function initSpaceScene() {
     };
   }
 
-  canvas.addEventListener('pointerdown', (event) => {
+  function isInteractiveTarget(target) {
+    return Boolean(target?.closest('a, button, input, select, textarea, label, form'));
+  }
+
+  document.addEventListener('pointerdown', (event) => {
+    if (isInteractiveTarget(event.target)) return;
     dragging = true;
     moved = false;
     lastX = event.clientX;
     lastY = event.clientY;
-    canvas.classList.add('is-dragging');
-    canvas.setPointerCapture(event.pointerId);
+    document.body.classList.add('is-dragging');
   });
-  canvas.addEventListener('pointermove', (event) => {
+  document.addEventListener('pointermove', (event) => {
     if (!dragging) return;
     const dx = event.clientX - lastX;
     const dy = event.clientY - lastY;
@@ -914,13 +918,12 @@ function initSpaceScene() {
     lastX = event.clientX;
     lastY = event.clientY;
   });
-  canvas.addEventListener('pointerup', (event) => {
+  document.addEventListener('pointerup', () => {
     dragging = false;
-    canvas.classList.remove('is-dragging');
-    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    document.body.classList.remove('is-dragging');
   });
-  canvas.addEventListener('click', (event) => {
-    if (moved) return;
+  document.addEventListener('click', (event) => {
+    if (moved || isInteractiveTarget(event.target)) return;
     updateCamera();
     const hit = bodies.map((body) => ({ body, position: screenPosition(body) })).filter((item) => item.position).sort((a, b) => a.position.radius - b.position.radius).find(({ position }) => Math.hypot(event.clientX - position.x, event.clientY - position.y) < position.radius + 18);
     if (hit) focusWorld(hit.body.key);
@@ -932,6 +935,12 @@ function initSpaceScene() {
   resize();
   render();
 }
-initSpaceScene();
+try {
+  initSpaceScene();
+} catch (error) {
+  console.error('3D scene failed to start:', error);
+  const sceneStatus = document.querySelector('.status-pill');
+  if (sceneStatus) sceneStatus.innerHTML = '<i></i> 3D SCENE ERROR';
+}
 refreshUsbDevices();
 refreshSerialDevices();
