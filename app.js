@@ -24,6 +24,7 @@ const virtualDiskDropZone = document.querySelector('#virtualDiskDropZone');
 const virtualDiskProgress = document.querySelector('#virtualDiskProgress');
 const virtualDiskFileName = document.querySelector('#virtualDiskFileName');
 const virtualDiskStatus = document.querySelector('#virtualDiskStatus');
+const virtualDiskModeToggle = document.querySelector('#virtualDiskModeToggle');
 
 const DFU = {
   DNLOAD: 0x01,
@@ -44,6 +45,7 @@ const DEFAULT_DFU_TRANSFER_SIZE = 1024;
 const STM32_FLASH_START = 0x08000000;
 const STM32_H7_SECTOR_SIZE = 128 * 1024;
 const VIRTUAL_DISK_VOLUME_NAME = 'GOHO UPDATE';
+const VIRTUAL_DISK_COMMAND = 'XXX';
 const VIRTUAL_DISK_FIRMWARE_NAME = 'UPDATE.BIN';
 // bootloader_no_wav: 1024 sectors - 11 FAT/root sectors - 1 README cluster.
 const VIRTUAL_DISK_MAX_FIRMWARE_BYTES = (1024 - 11 - 1) * 512;
@@ -439,6 +441,14 @@ function setVirtualDiskStatus(message) {
   virtualDiskStatus.textContent = message;
 }
 
+function updateVirtualDiskModeToggle() {
+  const connected = Boolean(serialPort && serialWriter);
+  virtualDiskModeToggle.disabled = !connected || virtualDiskBusy;
+  if (!connected && virtualDiskModeToggle.checked) {
+    virtualDiskModeToggle.checked = false;
+  }
+}
+
 function setVirtualDiskReady(ready) {
   virtualDiskDropZone.classList.toggle('is-ready', ready);
   virtualDiskDropZone.setAttribute('aria-disabled', String(!ready));
@@ -654,6 +664,29 @@ async function waitForVirtualDiskExit(directoryHandle) {
   return false;
 }
 
+virtualDiskModeToggle.addEventListener('change', async () => {
+  if (!virtualDiskModeToggle.checked) return;
+  if (!serialWriter || !serialPort) {
+    virtualDiskModeToggle.checked = false;
+    setVirtualDiskStatus('请先选择 CDC 设备');
+    updateVirtualDiskModeToggle();
+    return;
+  }
+  virtualDiskModeToggle.disabled = true;
+  setVirtualDiskStatus('正在发送 XXX，等待设备进入虚拟磁盘…');
+  try {
+    // The firmware command parser is line based, so the payload is XXX
+    // followed by CRLF; no manual text entry is needed in the monitor.
+    const bytes = new TextEncoder().encode(`${VIRTUAL_DISK_COMMAND}\r\n`);
+    await serialWriter.write(bytes);
+    addBytes('>', bytes);
+    addMessage('已发送 XXX，等待设备重新枚举为 GOHO UPDATE');
+  } catch (error) {
+    virtualDiskModeToggle.checked = false;
+    setVirtualDiskStatus(`进入虚拟磁盘失败：${error.message || error}`);
+    updateVirtualDiskModeToggle();
+  }
+});
 virtualDiskButton.addEventListener('click', chooseVirtualDisk);
 virtualDiskFile.addEventListener('change', () => {
   const file = virtualDiskFile.files?.[0];
@@ -703,6 +736,7 @@ async function readSerial() {
     monitorRunning = false;
     monitorState.textContent = 'STOPPED';
     monitorState.style.color = 'var(--danger)';
+    if (!serialPort?.readable) updateVirtualDiskModeToggle();
   }
 }
 
@@ -732,6 +766,7 @@ serialButton.addEventListener('click', async () => {
       serialPort = undefined;
       serialButton.textContent = '选择 CDC 设备';
       serialStatus.textContent = '已断开';
+      updateVirtualDiskModeToggle();
       return;
     }
     // Always open the browser chooser so the user explicitly selects the device.
@@ -746,12 +781,14 @@ serialButton.addEventListener('click', async () => {
       ? ` · USB ${selectedPortInfo.usbVendorId.toString(16).padStart(4, '0')}:${selectedPortInfo.usbProductId.toString(16).padStart(4, '0')}`
       : '';
     serialStatus.textContent = `已连接：${portName(serialPort)}${usbId}，等待数据`;
+    updateVirtualDiskModeToggle();
     addMessage(`串口已连接：${portName(serialPort)}${usbId}，波特率 ${baudRate.value}`);
     readSerial();
   } catch (error) {
     serialStatus.textContent = error.name === 'NotFoundError' ? '未选择设备' : `连接失败：${error.message}`;
     serialPort = undefined;
     serialWriter = undefined;
+    updateVirtualDiskModeToggle();
   }
 });
 

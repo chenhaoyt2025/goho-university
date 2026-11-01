@@ -212,6 +212,14 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .world-panel-disk .panel-signal span { background: var(--lime); box-shadow: 0 0 12px var(--lime); }
 .disk-copy p { max-width: 430px; margin-bottom: 0; }
 .disk-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; }
+.disk-mode-switch { display: inline-flex; align-items: center; gap: 9px; min-height: 42px; color: var(--text); font: 11px var(--mono); white-space: nowrap; cursor: pointer; user-select: none; }
+.disk-mode-switch input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.disk-mode-switch i { position: relative; display: inline-block; width: 40px; height: 22px; border: 1px solid rgba(197, 255, 118, .42); border-radius: 999px; background: rgba(5, 7, 20, .72); transition: background .2s ease, border-color .2s ease, box-shadow .2s ease; }
+.disk-mode-switch i::after { position: absolute; content: ''; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: transform .2s ease, background .2s ease, box-shadow .2s ease; }
+.disk-mode-switch input:checked + i { border-color: var(--lime); background: rgba(197, 255, 118, .16); box-shadow: 0 0 18px rgba(197, 255, 118, .18); }
+.disk-mode-switch input:checked + i::after { transform: translateX(18px); background: var(--lime); box-shadow: 0 0 12px rgba(197, 255, 118, .8); }
+.disk-mode-switch input:focus-visible + i { outline: 2px solid rgba(119, 231, 255, .8); outline-offset: 3px; }
+.disk-mode-switch:has(input:disabled) { cursor: not-allowed; opacity: .42; }
 .disk-drop-zone {
   display: grid;
   min-height: 72px;
@@ -241,6 +249,7 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 
 @media (max-width: 520px) {
   .disk-actions { grid-template-columns: 1fr; }
+  .disk-mode-switch { justify-content: space-between; }
   .disk-actions .button { width: 100%; }
   .disk-drop-zone, .disk-actions progress, .disk-file-name, .disk-actions .card-status { grid-column: auto; }
 }

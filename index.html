@@ -82,6 +82,11 @@
                 <p>选择 GOHO UPDATE 磁盘，把应用 BIN 拖进去，设备会自动退出。</p>
               </div>
               <div class="disk-actions">
+                <label class="disk-mode-switch" for="virtualDiskModeToggle">
+                  <span>虚拟磁盘烧录</span>
+                  <input id="virtualDiskModeToggle" type="checkbox" role="switch" disabled />
+                  <i aria-hidden="true"></i>
+                </label>
                 <button class="button button-primary" id="virtualDiskButton" type="button">选择虚拟磁盘</button>
                 <input id="virtualDiskFile" type="file" accept=".bin,.BIN" hidden />
                 <div class="disk-drop-zone" id="virtualDiskDropZone" role="button" tabindex="0" aria-disabled="true">
