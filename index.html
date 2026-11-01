@@ -79,7 +79,7 @@
                 <div class="panel-signal"><span></span> WORLD / MSC</div>
                 <div class="panel-icon">▱</div>
                 <h3 id="virtual-disk-title">虚拟磁盘烧录</h3>
-                <p>选择 GOHO UPDATE 磁盘，把应用 BIN 拖进去，设备会自动退出。</p>
+                <p>先连接 CDC 并打开开关，设备会进入 GOHO UPDATE；再把应用 BIN 拖进去。</p>
               </div>
               <div class="disk-actions">
                 <label class="disk-mode-switch" for="virtualDiskModeToggle">
@@ -95,7 +95,7 @@
                 </div>
                 <progress id="virtualDiskProgress" value="0" max="100" hidden></progress>
                 <span class="disk-file-name" id="virtualDiskFileName">未连接虚拟磁盘</span>
-                <span class="card-status" id="virtualDiskStatus">等待选择 GOHO UPDATE</span>
+                <span class="card-status" id="virtualDiskStatus">先连接 CDC，打开虚拟磁盘烧录</span>
               </div>
             </article>
 
