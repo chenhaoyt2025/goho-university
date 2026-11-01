@@ -25,6 +25,13 @@ const virtualDiskProgress = document.querySelector('#virtualDiskProgress');
 const virtualDiskFileName = document.querySelector('#virtualDiskFileName');
 const virtualDiskStatus = document.querySelector('#virtualDiskStatus');
 const virtualDiskModeToggle = document.querySelector('#virtualDiskModeToggle');
+const audioRefreshButton = document.querySelector('#audioRefreshButton');
+const audioInputSelect = document.querySelector('#audioInputSelect');
+const audioStartButton = document.querySelector('#audioStartButton');
+const audioStopButton = document.querySelector('#audioStopButton');
+const audioVolume = document.querySelector('#audioVolume');
+const audioVolumeValue = document.querySelector('#audioVolumeValue');
+const audioStatus = document.querySelector('#audioStatus');
 
 const DFU = {
   DNLOAD: 0x01,
@@ -64,6 +71,11 @@ let flashing = false;
 let virtualDiskHandle;
 let virtualDiskBusy = false;
 let virtualDiskPollToken = 0;
+let audioInputDevices = [];
+let audioStream;
+let audioContext;
+let audioSource;
+let audioGain;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -715,6 +727,158 @@ virtualDiskDropZone.addEventListener('drop', (event) => {
   if (!virtualDiskHandle || virtualDiskBusy) return;
   void loadVirtualDiskFile(event.dataTransfer?.files?.[0]);
 });
+
+function setAudioStatus(message) {
+  audioStatus.textContent = message;
+}
+
+function updateAudioControls() {
+  const running = Boolean(audioStream && audioContext && audioContext.state !== 'closed');
+  audioRefreshButton.disabled = running;
+  audioInputSelect.disabled = running || !audioInputDevices.length;
+  audioStartButton.disabled = running || !audioInputSelect.value;
+  audioStopButton.disabled = !running;
+}
+
+function audioDeviceLabel(device, index) {
+  return device.label || `USB Audio 输入 ${index + 1}`;
+}
+
+async function enumerateAudioInputs() {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    setAudioStatus(browserMessage('Web Audio / MediaDevices'));
+    return [];
+  }
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices.filter((device) => device.kind === 'audioinput');
+}
+
+async function scanAudioInputs() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setAudioStatus(browserMessage('Web Audio / getUserMedia'));
+    return;
+  }
+  audioRefreshButton.disabled = true;
+  setAudioStatus('请在浏览器权限窗口中允许音频输入…');
+  let permissionStream;
+  try {
+    // A first capture grants the browser permission needed for device labels and
+    // for selecting a non-default USB Audio input below.
+    permissionStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+    audioInputDevices = await enumerateAudioInputs();
+    audioInputSelect.replaceChildren();
+    audioInputDevices.forEach((device, index) => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.textContent = audioDeviceLabel(device, index);
+      audioInputSelect.append(option);
+    });
+    if (!audioInputDevices.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '没有检测到音频输入';
+      audioInputSelect.append(option);
+      setAudioStatus('没有检测到 USB Audio 输入，请确认模块已经被系统识别');
+    } else {
+      setAudioStatus(`检测到 ${audioInputDevices.length} 个音频输入 · 请选择模块后开始监听`);
+    }
+  } catch (error) {
+    audioInputDevices = [];
+    audioInputSelect.replaceChildren(new Option('请先授权并扫描设备', ''));
+    const reason = error.name === 'NotAllowedError'
+      ? '浏览器或 macOS 没有允许音频输入权限'
+      : error.name === 'NotFoundError'
+        ? '没有找到音频输入设备'
+        : `扫描失败：${error.message || error}`;
+    setAudioStatus(reason);
+  } finally {
+    permissionStream?.getTracks().forEach((track) => track.stop());
+    updateAudioControls();
+  }
+}
+
+async function stopUsbAudioMonitor() {
+  audioSource?.disconnect();
+  audioGain?.disconnect();
+  audioSource = undefined;
+  audioGain = undefined;
+  audioStream?.getTracks().forEach((track) => track.stop());
+  audioStream = undefined;
+  if (audioContext) {
+    try { await audioContext.close(); } catch { /* already closed */ }
+    audioContext = undefined;
+  }
+  updateAudioControls();
+  setAudioStatus('监听已停止 · 输出到电脑默认声音设备');
+}
+
+async function startUsbAudioMonitor() {
+  const deviceId = audioInputSelect.value;
+  if (!deviceId) {
+    setAudioStatus('请先扫描并选择 USB Audio 输入');
+    return;
+  }
+  audioStartButton.disabled = true;
+  setAudioStatus('正在打开 USB Audio 输入…');
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: { exact: deviceId },
+        channelCount: { ideal: 2 },
+        sampleRate: { ideal: 48000 },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+    audioContext = new AudioContext({ latencyHint: 'interactive' });
+    await audioContext.resume();
+    audioSource = audioContext.createMediaStreamSource(audioStream);
+    audioGain = audioContext.createGain();
+    audioGain.gain.value = Number(audioVolume.value) / 100;
+    audioSource.connect(audioGain);
+    audioGain.connect(audioContext.destination);
+    audioStream.getAudioTracks().forEach((track) => {
+      track.addEventListener('ended', () => {
+        if (audioStream) void stopUsbAudioMonitor();
+      }, { once: true });
+    });
+    const settings = audioStream.getAudioTracks()[0]?.getSettings?.() || {};
+    const rate = settings.sampleRate ? ` · ${settings.sampleRate} Hz` : '';
+    setAudioStatus(`正在监听：${audioInputSelect.selectedOptions[0]?.textContent || 'USB Audio'}${rate} · 输出到电脑默认声音设备`);
+  } catch (error) {
+    await stopUsbAudioMonitor();
+    setAudioStatus(`打开 USB Audio 失败：${error.message || error}`);
+  } finally {
+    updateAudioControls();
+  }
+}
+
+audioRefreshButton.addEventListener('click', () => void scanAudioInputs());
+audioStartButton.addEventListener('click', () => void startUsbAudioMonitor());
+audioStopButton.addEventListener('click', () => void stopUsbAudioMonitor());
+audioInputSelect.addEventListener('change', () => {
+  if (!audioStream) updateAudioControls();
+});
+audioVolume.addEventListener('input', () => {
+  audioVolumeValue.textContent = `${audioVolume.value}%`;
+  if (audioGain) audioGain.gain.value = Number(audioVolume.value) / 100;
+});
+if (navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    if (!audioStream) void enumerateAudioInputs().then((devices) => {
+      audioInputDevices = devices;
+      updateAudioControls();
+    }).catch(() => {});
+  });
+}
+updateAudioControls();
 
 async function readSerial() {
   if (!serialPort?.readable || monitorRunning) return;

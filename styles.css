@@ -211,6 +211,26 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .world-panel-disk .panel-icon { margin: 30px 0 14px; color: var(--lime); text-shadow: 0 0 20px rgba(197, 255, 118, .35); }
 .world-panel-disk .panel-signal span { background: var(--lime); box-shadow: 0 0 12px var(--lime); }
 .disk-copy p { max-width: 430px; margin-bottom: 0; }
+.world-panel-audio {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, .72fr) minmax(320px, 1.28fr);
+  align-items: center;
+  gap: 34px;
+  min-height: 218px;
+  transform: translateY(-2px) rotate(.35deg);
+}
+.world-panel-audio .panel-icon { margin: 30px 0 14px; color: var(--cyan); text-shadow: 0 0 20px rgba(119, 231, 255, .38); }
+.world-panel-audio .panel-signal span { background: var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+.audio-copy p { max-width: 430px; margin-bottom: 0; }
+.audio-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; }
+.audio-actions select { min-width: 0; height: 42px; padding: 0 34px 0 12px; border: 1px solid rgba(119, 231, 255, .28); border-radius: 999px; background: rgba(5, 7, 20, .72); color: var(--text); font: 11px var(--mono); }
+.audio-actions select:disabled { cursor: not-allowed; opacity: .5; }
+.audio-action-row { display: flex; align-items: center; gap: 8px; }
+.audio-volume { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 11px var(--mono); }
+.audio-volume input { width: min(190px, 100%); accent-color: var(--cyan); }
+.audio-volume output { min-width: 34px; color: var(--text); text-align: right; }
+.audio-actions .card-status { grid-column: 1 / -1; margin-top: -2px; }
 .disk-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; }
 .disk-mode-switch { display: inline-flex; align-items: center; gap: 9px; min-height: 42px; color: var(--text); font: 11px var(--mono); white-space: nowrap; cursor: pointer; user-select: none; }
 .disk-mode-switch input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
@@ -243,13 +263,14 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .disk-actions .card-status { grid-column: 1 / -1; margin-top: -2px; }
 
 @media (max-width: 820px) {
-  .world-panel-disk { grid-column: auto; grid-template-columns: 1fr; gap: 8px; transform: none; }
-  .world-panel-disk .panel-icon { margin-top: 28px; }
+  .world-panel-disk, .world-panel-audio { grid-column: auto; grid-template-columns: 1fr; gap: 8px; transform: none; }
+  .world-panel-disk .panel-icon, .world-panel-audio .panel-icon { margin-top: 28px; }
 }
 
 @media (max-width: 520px) {
-  .disk-actions { grid-template-columns: 1fr; }
+  .disk-actions, .audio-actions { grid-template-columns: 1fr; }
   .disk-mode-switch { justify-content: space-between; }
-  .disk-actions .button { width: 100%; }
+  .disk-actions .button, .audio-actions .button, .audio-actions select { width: 100%; }
+  .audio-action-row { display: grid; grid-template-columns: 1fr 1fr; }
   .disk-drop-zone, .disk-actions progress, .disk-file-name, .disk-actions .card-status { grid-column: auto; }
 }
