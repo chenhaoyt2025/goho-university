@@ -6,9 +6,12 @@ GOHO University 产品与在线硬件工具的第一版静态网页原型。
 
 - 产品入口页：U Modules、VST Plugins、Small Software、Web Tools
 - WebUSB 授权设备列表、BIN/HEX 固件文件选择、STM32 DfuSe DFU 烧录
+- File System Access API 虚拟磁盘烧录：选择 `GOHO UPDATE`，拖入 application-only `.BIN`，写完后检测磁盘自动退出
 - Web Serial 授权 CDC/串口设备列表、Start/Stop、TXT/HEX 接收与发送、LF/CRLF 行尾
 
 > DFU 当前按项目现有 `dfu-util -a 0 -s 0x08000000:leave -D ...` 流程实现：支持 STM32 DfuSe 接口、Flash 擦除、分块写入、HEX 地址记录和完成后重启。实际硬件仍需连接测试；如果设备不是 STM32 DfuSe，需要单独适配协议。
+
+> 虚拟磁盘对应 `bootloader_no_wav/usb_msc_official.cc`：卷标是 `GOHO UPDATE`，FAT12 RAM disk 总容量 512 KiB，根目录用 `UPDATE.BIN` 写入；bootloader 接受任意 `.BIN` 但随后按 application vector table 校验，因此 bootloader + application combo 应继续使用 DFU，不要拖进虚拟磁盘。
 
 ## 本地预览
 

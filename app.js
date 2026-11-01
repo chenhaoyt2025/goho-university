@@ -18,6 +18,12 @@ const sendFormat = document.querySelector('#sendFormat');
 const lineEnding = document.querySelector('#lineEnding');
 const sendInput = document.querySelector('#sendInput');
 const baudRate = document.querySelector('#baudRate');
+const virtualDiskButton = document.querySelector('#virtualDiskButton');
+const virtualDiskFile = document.querySelector('#virtualDiskFile');
+const virtualDiskDropZone = document.querySelector('#virtualDiskDropZone');
+const virtualDiskProgress = document.querySelector('#virtualDiskProgress');
+const virtualDiskFileName = document.querySelector('#virtualDiskFileName');
+const virtualDiskStatus = document.querySelector('#virtualDiskStatus');
 
 const DFU = {
   DNLOAD: 0x01,
@@ -37,6 +43,12 @@ const DFU = {
 const DEFAULT_DFU_TRANSFER_SIZE = 1024;
 const STM32_FLASH_START = 0x08000000;
 const STM32_H7_SECTOR_SIZE = 128 * 1024;
+const VIRTUAL_DISK_VOLUME_NAME = 'GOHO UPDATE';
+const VIRTUAL_DISK_FIRMWARE_NAME = 'UPDATE.BIN';
+// bootloader_no_wav: 1024 sectors - 11 FAT/root sectors - 1 README cluster.
+const VIRTUAL_DISK_MAX_FIRMWARE_BYTES = (1024 - 11 - 1) * 512;
+const VIRTUAL_DISK_POLL_INTERVAL_MS = 600;
+const VIRTUAL_DISK_POLL_TIMEOUT_MS = 45000;
 
 let usbDevices = [];
 let selectedUsbDevice;
@@ -47,6 +59,9 @@ let serialReader;
 let monitorRunning = false;
 let receivedChunks = [];
 let flashing = false;
+let virtualDiskHandle;
+let virtualDiskBusy = false;
+let virtualDiskPollToken = 0;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -419,6 +434,254 @@ async function flashDfu() {
 }
 
 flashButton.addEventListener('click', flashDfu);
+
+function setVirtualDiskStatus(message) {
+  virtualDiskStatus.textContent = message;
+}
+
+function setVirtualDiskReady(ready) {
+  virtualDiskDropZone.classList.toggle('is-ready', ready);
+  virtualDiskDropZone.setAttribute('aria-disabled', String(!ready));
+  virtualDiskButton.textContent = ready ? '更换虚拟磁盘' : '选择虚拟磁盘';
+}
+
+function normalizeVolumeName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function isReadmeName(name) {
+  return String(name || '').toUpperCase().replace(/\s+/g, '') === 'README.TXT';
+}
+
+function isDiskGoneError(error) {
+  return ['AbortError', 'InvalidStateError', 'NotFoundError', 'NotReadableError'].includes(error?.name)
+    || /not found|not readable|invalid state|disconnected|no longer available|已移除|不可用/i.test(error?.message || '');
+}
+
+async function readDirectoryEntries(directoryHandle) {
+  const entries = [];
+  for await (const [name, handle] of directoryHandle.entries()) {
+    entries.push({ name, handle });
+  }
+  return entries;
+}
+
+async function inspectVirtualDisk(directoryHandle) {
+  const entries = await readDirectoryEntries(directoryHandle);
+  const readme = entries.find(({ name, handle }) => handle.kind === 'file' && isReadmeName(name));
+  let hasGohoMarker = false;
+  if (readme) {
+    const readmeFile = await readme.handle.getFile();
+    const text = await readmeFile.slice(0, 128).text();
+    hasGohoMarker = text.includes('GOHO_v1 USB UPDATE');
+  }
+  const hasVolumeName = normalizeVolumeName(directoryHandle.name) === VIRTUAL_DISK_VOLUME_NAME;
+  if (!hasVolumeName && !hasGohoMarker) {
+    throw new Error('没有找到 GOHO UPDATE 或 README.TXT，请先让设备进入虚拟磁盘模式');
+  }
+  return { entries, hasGohoMarker, hasVolumeName };
+}
+
+async function requestVirtualDiskPermission(directoryHandle) {
+  let permission = await directoryHandle.queryPermission({ mode: 'readwrite' });
+  if (permission !== 'granted') {
+    permission = await directoryHandle.requestPermission({ mode: 'readwrite' });
+  }
+  return permission === 'granted';
+}
+
+function virtualDiskBinNames(entries) {
+  return entries
+    .filter(({ name, handle }) => handle.kind === 'file' && /\.bin$/i.test(name))
+    .map(({ name }) => name);
+}
+
+function readUint32LE(bytes, offset) {
+  return (bytes[offset]
+    | (bytes[offset + 1] << 8)
+    | (bytes[offset + 2] << 16)
+    | (bytes[offset + 3] << 24)) >>> 0;
+}
+
+function isRamAddress(address) {
+  return (address >= 0x20000000 && address <= 0x20020000)
+    || (address >= 0x24000000 && address <= 0x24080000)
+    || (address >= 0x30000000 && address <= 0x30040000)
+    || (address >= 0x38000000 && address <= 0x38010000);
+}
+
+function validateVirtualDiskImage(bytes) {
+  if (bytes.length < 8) throw new Error('应用 BIN 太小，无法读取向量表');
+  const initialSp = readUint32LE(bytes, 0);
+  const resetHandler = readUint32LE(bytes, 4);
+  if ((initialSp & 7) !== 0 || !isRamAddress(initialSp)) {
+    throw new Error('这个 BIN 不是虚拟磁盘需要的应用镜像（首地址不是有效 RAM 栈地址）');
+  }
+  const handler = resetHandler & ~1;
+  if ((resetHandler & 1) === 0 || handler < 0x08020000 || handler >= 0x081e0000) {
+    throw new Error('这个 BIN 包含 bootloader + 应用 combo；虚拟磁盘只接受 application-only BIN，请用 DFU 烧录 combo');
+  }
+}
+
+async function chooseVirtualDisk() {
+  if (!('showDirectoryPicker' in window)) {
+    setVirtualDiskStatus(browserMessage('File System Access API'));
+    return;
+  }
+  try {
+    const candidate = await window.showDirectoryPicker({
+      id: 'goho-update-disk',
+      mode: 'readwrite',
+    });
+    if (!await requestVirtualDiskPermission(candidate)) {
+      throw new Error('没有获得虚拟磁盘的读写权限');
+    }
+    const info = await inspectVirtualDisk(candidate);
+    virtualDiskHandle = candidate;
+    virtualDiskPollToken += 1;
+    setVirtualDiskReady(true);
+    const binNames = virtualDiskBinNames(info.entries);
+    virtualDiskFileName.textContent = `${candidate.name} · ${binNames.length ? `已有 ${binNames.join(', ')}` : '可写入'}`;
+    setVirtualDiskStatus(binNames.length
+      ? '已连接；如不是 UPDATE.BIN，请先移除旧 BIN'
+      : '已连接，等待拖入 application BIN');
+  } catch (error) {
+    if (error.name === 'AbortError' || error.name === 'NotAllowedError') {
+      setVirtualDiskStatus('未选择虚拟磁盘');
+      return;
+    }
+    setVirtualDiskStatus(`连接失败：${error.message || error}`);
+  }
+}
+
+async function loadVirtualDiskFile(file) {
+  if (!file || virtualDiskBusy) return;
+  if (!virtualDiskHandle) {
+    setVirtualDiskStatus('请先选择 GOHO UPDATE 虚拟磁盘');
+    return;
+  }
+  const lowerName = file.name.toLowerCase();
+  if (!lowerName.endsWith('.bin')) {
+    setVirtualDiskStatus('虚拟磁盘模式只支持 .BIN 文件');
+    return;
+  }
+  if (!file.size || file.size > VIRTUAL_DISK_MAX_FIRMWARE_BYTES) {
+    setVirtualDiskStatus(`BIN 太大，当前虚拟磁盘可用上限约 ${formatBytes(VIRTUAL_DISK_MAX_FIRMWARE_BYTES)}`);
+    return;
+  }
+
+  virtualDiskBusy = true;
+  virtualDiskDropZone.classList.add('is-busy');
+  virtualDiskProgress.hidden = false;
+  virtualDiskProgress.value = 0;
+  virtualDiskFileName.textContent = `${file.name} → ${VIRTUAL_DISK_FIRMWARE_NAME} · ${formatBytes(file.size)}`;
+  setVirtualDiskStatus('正在读取并检查应用 BIN…');
+
+  let writable;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    validateVirtualDiskImage(bytes);
+    const info = await inspectVirtualDisk(virtualDiskHandle);
+    const existingBins = virtualDiskBinNames(info.entries);
+    const conflictingBins = existingBins.filter((name) => normalizeVolumeName(name) !== VIRTUAL_DISK_FIRMWARE_NAME);
+    if (conflictingBins.length) {
+      throw new Error(`磁盘内已有其他 BIN：${conflictingBins.join(', ')}；请先移除，避免 bootloader 选错文件`);
+    }
+
+    const target = await virtualDiskHandle.getFileHandle(VIRTUAL_DISK_FIRMWARE_NAME, { create: true });
+    writable = await target.createWritable();
+    const chunkSize = 64 * 1024;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.slice(offset, Math.min(offset + chunkSize, bytes.length));
+      await writable.write(chunk);
+      virtualDiskProgress.value = Math.round(((offset + chunk.length) / bytes.length) * 100);
+      setVirtualDiskStatus(`正在写入 ${VIRTUAL_DISK_FIRMWARE_NAME}：${virtualDiskProgress.value}%`);
+    }
+    await writable.close();
+    writable = undefined;
+    setVirtualDiskStatus('固件已写入，等待设备自动退出虚拟磁盘…');
+
+    const gone = await waitForVirtualDiskExit(virtualDiskHandle);
+    if (gone) {
+      virtualDiskHandle = undefined;
+      setVirtualDiskReady(false);
+      virtualDiskFileName.textContent = '设备已退出虚拟磁盘';
+      setVirtualDiskStatus('设备已退出，正在写入 Flash 并自动重启');
+    } else {
+      setVirtualDiskStatus('已写入，但暂未检测到磁盘退出；请检查设备状态');
+    }
+  } catch (error) {
+    if (writable) {
+      try { await writable.abort(); } catch { /* the disk may have disappeared */ }
+    }
+    if (isDiskGoneError(error)) {
+      virtualDiskHandle = undefined;
+      setVirtualDiskReady(false);
+      virtualDiskFileName.textContent = '设备已退出虚拟磁盘';
+      setVirtualDiskStatus('设备已退出，未能确认本次写入结果');
+    } else {
+      setVirtualDiskStatus(`虚拟磁盘烧录失败：${error.message || error}`);
+    }
+    virtualDiskProgress.value = 0;
+  } finally {
+    virtualDiskBusy = false;
+    virtualDiskDropZone.classList.remove('is-busy', 'is-over');
+  }
+}
+
+async function virtualDiskIsMounted(directoryHandle) {
+  try {
+    const entries = await readDirectoryEntries(directoryHandle);
+    const readme = entries.find(({ name, handle }) => handle.kind === 'file' && isReadmeName(name));
+    if (readme) await readme.handle.getFile();
+    return true;
+  } catch (error) {
+    if (isDiskGoneError(error)) return false;
+    throw error;
+  }
+}
+
+async function waitForVirtualDiskExit(directoryHandle) {
+  const token = ++virtualDiskPollToken;
+  const started = Date.now();
+  while (token === virtualDiskPollToken && Date.now() - started < VIRTUAL_DISK_POLL_TIMEOUT_MS) {
+    await sleep(VIRTUAL_DISK_POLL_INTERVAL_MS);
+    if (token !== virtualDiskPollToken) return false;
+    if (!await virtualDiskIsMounted(directoryHandle)) return true;
+    const elapsed = Math.round((Date.now() - started) / 1000);
+    setVirtualDiskStatus(`固件已写入，等待设备自动退出… ${elapsed}s`);
+  }
+  return false;
+}
+
+virtualDiskButton.addEventListener('click', chooseVirtualDisk);
+virtualDiskFile.addEventListener('change', () => {
+  const file = virtualDiskFile.files?.[0];
+  virtualDiskFile.value = '';
+  void loadVirtualDiskFile(file);
+});
+virtualDiskDropZone.addEventListener('click', () => {
+  if (!virtualDiskBusy && virtualDiskHandle) virtualDiskFile.click();
+});
+virtualDiskDropZone.addEventListener('keydown', (event) => {
+  if ((event.key === 'Enter' || event.key === ' ') && !virtualDiskBusy && virtualDiskHandle) {
+    event.preventDefault();
+    virtualDiskFile.click();
+  }
+});
+['dragenter', 'dragover'].forEach((eventName) => {
+  virtualDiskDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    if (virtualDiskHandle && !virtualDiskBusy) virtualDiskDropZone.classList.add('is-over');
+  });
+});
+virtualDiskDropZone.addEventListener('dragleave', () => virtualDiskDropZone.classList.remove('is-over'));
+virtualDiskDropZone.addEventListener('drop', (event) => {
+  event.preventDefault();
+  virtualDiskDropZone.classList.remove('is-over');
+  if (!virtualDiskHandle || virtualDiskBusy) return;
+  void loadVirtualDiskFile(event.dataTransfer?.files?.[0]);
+});
 
 async function readSerial() {
   if (!serialPort?.readable || monitorRunning) return;
