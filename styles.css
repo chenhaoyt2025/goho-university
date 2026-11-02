@@ -256,6 +256,7 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .disk-drop-zone strong { font-size: 12px; font-weight: 500; }
 .disk-drop-zone small { color: var(--muted); font: 10px/1.45 var(--mono); }
 .disk-drop-zone.is-ready { cursor: pointer; border-color: rgba(197, 255, 118, .65); }
+.disk-drop-zone.is-mounted { box-shadow: 0 0 24px rgba(197, 255, 118, .12); }
 .disk-drop-zone.is-ready:hover, .disk-drop-zone.is-over { background: rgba(197, 255, 118, .12); border-color: var(--lime); transform: translateY(-2px); }
 .disk-drop-zone.is-busy { cursor: wait; border-color: rgba(119, 231, 255, .72); background: rgba(119, 231, 255, .08); }
 .disk-actions progress { grid-column: 1 / -1; width: 100%; height: 5px; margin: 0; accent-color: var(--lime); }

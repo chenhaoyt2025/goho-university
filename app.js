@@ -25,6 +25,7 @@ const virtualDiskProgress = document.querySelector('#virtualDiskProgress');
 const virtualDiskFileName = document.querySelector('#virtualDiskFileName');
 const virtualDiskStatus = document.querySelector('#virtualDiskStatus');
 const virtualDiskModeToggle = document.querySelector('#virtualDiskModeToggle');
+const enterVirtualDiskButton = document.querySelector('#enterVirtualDiskButton');
 const audioRefreshButton = document.querySelector('#audioRefreshButton');
 const audioInputSelect = document.querySelector('#audioInputSelect');
 const audioStartButton = document.querySelector('#audioStartButton');
@@ -53,11 +54,17 @@ const STM32_FLASH_START = 0x08000000;
 const STM32_H7_SECTOR_SIZE = 128 * 1024;
 const VIRTUAL_DISK_VOLUME_NAME = 'GOHO UPDATE';
 const VIRTUAL_DISK_COMMAND = 'XXX';
+const GOHO_USB_VENDOR_ID = 0x0483;
+const GOHO_USB_PRODUCT_ID = 0x4011;
 const VIRTUAL_DISK_FIRMWARE_NAME = 'UPDATE.BIN';
 // bootloader_no_wav: 1024 sectors - 11 FAT/root sectors - 1 README cluster.
 const VIRTUAL_DISK_MAX_FIRMWARE_BYTES = (1024 - 11 - 1) * 512;
 const VIRTUAL_DISK_POLL_INTERVAL_MS = 600;
 const VIRTUAL_DISK_POLL_TIMEOUT_MS = 45000;
+const VIRTUAL_DISK_MOUNT_TIMEOUT_MS = 20000;
+const VIRTUAL_DISK_HANDLE_DB = 'goho-university-device-handles';
+const VIRTUAL_DISK_HANDLE_STORE = 'handles';
+const VIRTUAL_DISK_HANDLE_KEY = 'goho-update-root';
 
 let usbDevices = [];
 let selectedUsbDevice;
@@ -71,6 +78,8 @@ let flashing = false;
 let virtualDiskHandle;
 let virtualDiskBusy = false;
 let virtualDiskPollToken = 0;
+let virtualDiskReady = false;
+let pendingVirtualDiskFile;
 let audioInputDevices = [];
 let audioStream;
 let audioContext;
@@ -461,10 +470,16 @@ function updateVirtualDiskModeToggle() {
   }
 }
 
+function setVirtualDiskBindingPrompt(visible, label = '绑定 GOHO UPDATE') {
+  virtualDiskButton.hidden = !visible;
+  virtualDiskButton.textContent = label;
+}
+
 function setVirtualDiskReady(ready) {
-  virtualDiskDropZone.classList.toggle('is-ready', ready);
-  virtualDiskDropZone.setAttribute('aria-disabled', String(!ready));
-  virtualDiskButton.textContent = ready ? '更换虚拟磁盘' : '选择虚拟磁盘';
+  virtualDiskReady = ready;
+  virtualDiskDropZone.classList.toggle('is-ready', !virtualDiskBusy);
+  virtualDiskDropZone.classList.toggle('is-mounted', ready);
+  virtualDiskDropZone.setAttribute('aria-disabled', String(Boolean(virtualDiskBusy)));
 }
 
 function normalizeVolumeName(name) {
@@ -478,6 +493,62 @@ function isReadmeName(name) {
 function isDiskGoneError(error) {
   return ['AbortError', 'InvalidStateError', 'NotFoundError', 'NotReadableError'].includes(error?.name)
     || /not found|not readable|invalid state|disconnected|no longer available|已移除|不可用/i.test(error?.message || '');
+}
+
+function openVirtualDiskHandleDb() {
+  if (!('indexedDB' in window)) return Promise.reject(new Error('浏览器不支持本地设备记忆'));
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(VIRTUAL_DISK_HANDLE_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(VIRTUAL_DISK_HANDLE_STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('无法打开本地设备记忆'));
+  });
+}
+
+async function saveRememberedVirtualDisk(handle) {
+  try {
+    const db = await openVirtualDiskHandleDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIRTUAL_DISK_HANDLE_STORE, 'readwrite');
+      transaction.objectStore(VIRTUAL_DISK_HANDLE_STORE).put(handle, VIRTUAL_DISK_HANDLE_KEY);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error || new Error('无法保存 GOHO UPDATE 记忆'));
+    });
+    db.close();
+  } catch {
+    // The app still works for the current tab if IndexedDB is unavailable.
+  }
+}
+
+async function loadRememberedVirtualDisk() {
+  try {
+    const db = await openVirtualDiskHandleDb();
+    const handle = await new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIRTUAL_DISK_HANDLE_STORE, 'readonly');
+      const request = transaction.objectStore(VIRTUAL_DISK_HANDLE_STORE).get(VIRTUAL_DISK_HANDLE_KEY);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('无法读取 GOHO UPDATE 记忆'));
+    });
+    db.close();
+    return handle;
+  } catch {
+    return undefined;
+  }
+}
+
+async function clearRememberedVirtualDisk() {
+  try {
+    const db = await openVirtualDiskHandleDb();
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(VIRTUAL_DISK_HANDLE_STORE, 'readwrite');
+      transaction.objectStore(VIRTUAL_DISK_HANDLE_STORE).delete(VIRTUAL_DISK_HANDLE_KEY);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error || new Error('无法清除 GOHO UPDATE 记忆'));
+    });
+    db.close();
+  } catch {
+    // Nothing else to do; manual binding remains available.
+  }
 }
 
 async function readDirectoryEntries(directoryHandle) {
@@ -504,9 +575,9 @@ async function inspectVirtualDisk(directoryHandle) {
   return { entries, hasGohoMarker, hasVolumeName };
 }
 
-async function requestVirtualDiskPermission(directoryHandle) {
+async function requestVirtualDiskPermission(directoryHandle, { request = false } = {}) {
   let permission = await directoryHandle.queryPermission({ mode: 'readwrite' });
-  if (permission !== 'granted') {
+  if (permission !== 'granted' && request) {
     permission = await directoryHandle.requestPermission({ mode: 'readwrite' });
   }
   return permission === 'granted';
@@ -545,6 +616,22 @@ function validateVirtualDiskImage(bytes) {
   }
 }
 
+function updateVirtualDiskMount(info) {
+  virtualDiskReady = true;
+  setVirtualDiskReady(true);
+  setVirtualDiskBindingPrompt(false);
+  const binNames = virtualDiskBinNames(info.entries);
+  virtualDiskFileName.textContent = `${VIRTUAL_DISK_VOLUME_NAME} · ${binNames.length ? `已有 ${binNames.join(', ')}` : '可写入'}`;
+  setVirtualDiskStatus(binNames.length
+    ? 'GOHO UPDATE 已连接；如不是 UPDATE.BIN，请先移除旧 BIN'
+    : 'GOHO UPDATE 已连接，等待固件');
+  if (pendingVirtualDiskFile) {
+    const file = pendingVirtualDiskFile;
+    pendingVirtualDiskFile = undefined;
+    void loadVirtualDiskFile(file);
+  }
+}
+
 async function chooseVirtualDisk() {
   if (!('showDirectoryPicker' in window)) {
     setVirtualDiskStatus(browserMessage('File System Access API'));
@@ -555,31 +642,101 @@ async function chooseVirtualDisk() {
       id: 'goho-update-disk',
       mode: 'readwrite',
     });
-    if (!await requestVirtualDiskPermission(candidate)) {
-      throw new Error('没有获得虚拟磁盘的读写权限');
+    if (normalizeVolumeName(candidate.name) !== VIRTUAL_DISK_VOLUME_NAME) {
+      throw new Error(`请选择名为 ${VIRTUAL_DISK_VOLUME_NAME} 的设备`);
+    }
+    if (!await requestVirtualDiskPermission(candidate, { request: true })) {
+      throw new Error('没有获得 GOHO UPDATE 的读写权限');
     }
     const info = await inspectVirtualDisk(candidate);
     virtualDiskHandle = candidate;
     virtualDiskPollToken += 1;
-    setVirtualDiskReady(true);
-    const binNames = virtualDiskBinNames(info.entries);
-    virtualDiskFileName.textContent = `${candidate.name} · ${binNames.length ? `已有 ${binNames.join(', ')}` : '可写入'}`;
-    setVirtualDiskStatus(binNames.length
-      ? '已连接；如不是 UPDATE.BIN，请先移除旧 BIN'
-      : '已连接，等待拖入 application BIN');
+    await saveRememberedVirtualDisk(candidate);
+    updateVirtualDiskMount(info);
+    setVirtualDiskStatus('GOHO UPDATE 已绑定；以后连接 CDC 后会自动寻找');
   } catch (error) {
     if (error.name === 'AbortError' || error.name === 'NotAllowedError') {
-      setVirtualDiskStatus('未选择虚拟磁盘');
+      setVirtualDiskStatus('未绑定 GOHO UPDATE');
       return;
     }
-    setVirtualDiskStatus(`连接失败：${error.message || error}`);
+    setVirtualDiskStatus(`绑定失败：${error.message || error}`);
   }
+}
+
+async function restoreRememberedVirtualDisk() {
+  if (!('showDirectoryPicker' in window)) {
+    setVirtualDiskStatus(browserMessage('File System Access API'));
+    setVirtualDiskBindingPrompt(true, '浏览器不支持自动连接');
+    return;
+  }
+  const remembered = await loadRememberedVirtualDisk();
+  if (!remembered) {
+    setVirtualDiskStatus(`首次使用请绑定 ${VIRTUAL_DISK_VOLUME_NAME}（只需一次）`);
+    setVirtualDiskBindingPrompt(true);
+    return;
+  }
+  if (normalizeVolumeName(remembered.name) !== VIRTUAL_DISK_VOLUME_NAME) {
+    await clearRememberedVirtualDisk();
+    setVirtualDiskStatus(`已清除旧设备，请绑定 ${VIRTUAL_DISK_VOLUME_NAME}`);
+    setVirtualDiskBindingPrompt(true);
+    return;
+  }
+  virtualDiskHandle = remembered;
+  setVirtualDiskBindingPrompt(false);
+  setVirtualDiskReady(false);
+  virtualDiskFileName.textContent = `${VIRTUAL_DISK_VOLUME_NAME} · 等待设备连接`;
+  if (await requestVirtualDiskPermission(remembered)) {
+    try {
+      updateVirtualDiskMount(await inspectVirtualDisk(remembered));
+      return;
+    } catch (error) {
+      if (!isDiskGoneError(error)) setVirtualDiskStatus(`等待 ${VIRTUAL_DISK_VOLUME_NAME}：${error.message || error}`);
+    }
+  }
+  setVirtualDiskStatus(`${VIRTUAL_DISK_VOLUME_NAME} 已记忆；连接 CDC 后会自动寻找`);
+}
+
+async function waitForVirtualDiskMount() {
+  if (!virtualDiskHandle) return false;
+  const token = ++virtualDiskPollToken;
+  const started = Date.now();
+  while (token === virtualDiskPollToken && Date.now() - started < VIRTUAL_DISK_MOUNT_TIMEOUT_MS) {
+    try {
+      if (await requestVirtualDiskPermission(virtualDiskHandle)) {
+        updateVirtualDiskMount(await inspectVirtualDisk(virtualDiskHandle));
+        return true;
+      }
+    } catch (error) {
+      if (!isDiskGoneError(error) && /没有找到 GOHO UPDATE|README/i.test(error.message || '')) {
+        // The remembered directory exists, but it is not the fixed GOHO UPDATE volume.
+        break;
+      }
+    }
+    await sleep(VIRTUAL_DISK_POLL_INTERVAL_MS);
+  }
+  return false;
+}
+
+function queueVirtualDiskFile(file) {
+  if (!file) return;
+  const lowerName = file.name.toLowerCase();
+  if (!lowerName.endsWith('.bin')) {
+    setVirtualDiskStatus('虚拟磁盘模式只支持 .BIN 文件');
+    return;
+  }
+  if (!file.size || file.size > VIRTUAL_DISK_MAX_FIRMWARE_BYTES) {
+    setVirtualDiskStatus(`BIN 太大，当前虚拟磁盘可用上限约 ${formatBytes(VIRTUAL_DISK_MAX_FIRMWARE_BYTES)}`);
+    return;
+  }
+  pendingVirtualDiskFile = file;
+  virtualDiskFileName.textContent = `${file.name} · 等待 ${VIRTUAL_DISK_VOLUME_NAME}`;
+  setVirtualDiskStatus(`已选择 ${file.name}，进入 ${VIRTUAL_DISK_VOLUME_NAME} 后自动写入`);
 }
 
 async function loadVirtualDiskFile(file) {
   if (!file || virtualDiskBusy) return;
-  if (!virtualDiskHandle) {
-    setVirtualDiskStatus('请先选择 GOHO UPDATE 虚拟磁盘');
+  if (!virtualDiskHandle || !virtualDiskReady) {
+    queueVirtualDiskFile(file);
     return;
   }
   const lowerName = file.name.toLowerCase();
@@ -625,9 +782,11 @@ async function loadVirtualDiskFile(file) {
 
     const gone = await waitForVirtualDiskExit(virtualDiskHandle);
     if (gone) {
-      virtualDiskHandle = undefined;
+      virtualDiskReady = false;
       setVirtualDiskReady(false);
-      virtualDiskFileName.textContent = '设备已退出虚拟磁盘';
+      setVirtualDiskBindingPrompt(false);
+      virtualDiskModeToggle.checked = false;
+      virtualDiskFileName.textContent = '设备已退出 GOHO UPDATE';
       setVirtualDiskStatus('设备已退出，正在写入 Flash 并自动重启');
     } else {
       setVirtualDiskStatus('已写入，但暂未检测到磁盘退出；请检查设备状态');
@@ -637,9 +796,10 @@ async function loadVirtualDiskFile(file) {
       try { await writable.abort(); } catch { /* the disk may have disappeared */ }
     }
     if (isDiskGoneError(error)) {
-      virtualDiskHandle = undefined;
+      virtualDiskReady = false;
       setVirtualDiskReady(false);
-      virtualDiskFileName.textContent = '设备已退出虚拟磁盘';
+      setVirtualDiskBindingPrompt(false);
+      virtualDiskFileName.textContent = '设备已退出 GOHO UPDATE';
       setVirtualDiskStatus('设备已退出，未能确认本次写入结果');
     } else {
       setVirtualDiskStatus(`虚拟磁盘烧录失败：${error.message || error}`);
@@ -648,6 +808,8 @@ async function loadVirtualDiskFile(file) {
   } finally {
     virtualDiskBusy = false;
     virtualDiskDropZone.classList.remove('is-busy', 'is-over');
+    setVirtualDiskReady(virtualDiskReady);
+    updateVirtualDiskModeToggle();
   }
 }
 
@@ -676,26 +838,40 @@ async function waitForVirtualDiskExit(directoryHandle) {
   return false;
 }
 
+async function sendVirtualDiskCommand() {
+  if (!serialWriter || !serialPort) throw new Error('CDC 串口尚未连接');
+  // Ask while the button/switch click still has user activation, if the
+  // remembered directory permission has not survived the previous session.
+  if (virtualDiskHandle && !await requestVirtualDiskPermission(virtualDiskHandle, { request: true })) {
+    throw new Error(`没有获得 ${VIRTUAL_DISK_VOLUME_NAME} 的读写权限`);
+  }
+  const bytes = new TextEncoder().encode(`${VIRTUAL_DISK_COMMAND}\r\n`);
+  await serialWriter.write(bytes);
+  addBytes('>', bytes);
+  addMessage(`已发送 XXX，自动寻找 ${VIRTUAL_DISK_VOLUME_NAME}`);
+  if (!virtualDiskHandle) {
+    setVirtualDiskStatus(`设备正在进入 ${VIRTUAL_DISK_VOLUME_NAME}；首次使用请绑定一次设备`);
+    setVirtualDiskBindingPrompt(true);
+    return false;
+  }
+  setVirtualDiskReady(false);
+  const mounted = await waitForVirtualDiskMount();
+  if (!mounted) {
+    setVirtualDiskStatus(`未检测到 ${VIRTUAL_DISK_VOLUME_NAME}；请确认设备已重启并连接`);
+  }
+  return mounted;
+}
+
 virtualDiskModeToggle.addEventListener('change', async () => {
   if (!virtualDiskModeToggle.checked) return;
-  if (!serialWriter || !serialPort) {
-    virtualDiskModeToggle.checked = false;
-    setVirtualDiskStatus('请先选择 CDC 设备');
-    updateVirtualDiskModeToggle();
-    return;
-  }
   virtualDiskModeToggle.disabled = true;
-  setVirtualDiskStatus('正在发送 XXX，等待设备进入虚拟磁盘…');
+  setVirtualDiskStatus('正在通过 CDC 发送 XXX…');
   try {
-    // The firmware command parser is line based, so the payload is XXX
-    // followed by CRLF; no manual text entry is needed in the monitor.
-    const bytes = new TextEncoder().encode(`${VIRTUAL_DISK_COMMAND}\r\n`);
-    await serialWriter.write(bytes);
-    addBytes('>', bytes);
-    addMessage('已发送 XXX，等待设备重新枚举为 GOHO UPDATE');
+    await sendVirtualDiskCommand();
   } catch (error) {
     virtualDiskModeToggle.checked = false;
     setVirtualDiskStatus(`进入虚拟磁盘失败：${error.message || error}`);
+  } finally {
     updateVirtualDiskModeToggle();
   }
 });
@@ -706,10 +882,10 @@ virtualDiskFile.addEventListener('change', () => {
   void loadVirtualDiskFile(file);
 });
 virtualDiskDropZone.addEventListener('click', () => {
-  if (!virtualDiskBusy && virtualDiskHandle) virtualDiskFile.click();
+  if (!virtualDiskBusy) virtualDiskFile.click();
 });
 virtualDiskDropZone.addEventListener('keydown', (event) => {
-  if ((event.key === 'Enter' || event.key === ' ') && !virtualDiskBusy && virtualDiskHandle) {
+  if ((event.key === 'Enter' || event.key === ' ') && !virtualDiskBusy) {
     event.preventDefault();
     virtualDiskFile.click();
   }
@@ -717,16 +893,17 @@ virtualDiskDropZone.addEventListener('keydown', (event) => {
 ['dragenter', 'dragover'].forEach((eventName) => {
   virtualDiskDropZone.addEventListener(eventName, (event) => {
     event.preventDefault();
-    if (virtualDiskHandle && !virtualDiskBusy) virtualDiskDropZone.classList.add('is-over');
+    if (!virtualDiskBusy) virtualDiskDropZone.classList.add('is-over');
   });
 });
 virtualDiskDropZone.addEventListener('dragleave', () => virtualDiskDropZone.classList.remove('is-over'));
 virtualDiskDropZone.addEventListener('drop', (event) => {
   event.preventDefault();
   virtualDiskDropZone.classList.remove('is-over');
-  if (!virtualDiskHandle || virtualDiskBusy) return;
+  if (virtualDiskBusy) return;
   void loadVirtualDiskFile(event.dataTransfer?.files?.[0]);
 });
+void restoreRememberedVirtualDisk();
 
 function setAudioStatus(message) {
   audioStatus.textContent = message;
@@ -913,6 +1090,85 @@ async function stopReading() {
 
 startMonitor.addEventListener('click', () => readSerial());
 stopMonitor.addEventListener('click', () => stopReading());
+
+function serialPortUsbId(port) {
+  const info = port.getInfo();
+  return info.usbVendorId && info.usbProductId
+    ? `${info.usbVendorId.toString(16).padStart(4, '0')}:${info.usbProductId.toString(16).padStart(4, '0')}`
+    : '';
+}
+
+async function findAuthorizedGohoSerialPort() {
+  const ports = await navigator.serial.getPorts();
+  let usbDevices = [];
+  if ('usb' in navigator) {
+    try { usbDevices = await navigator.usb.getDevices(); } catch { /* WebUSB permission is optional. */ }
+  }
+  const matches = ports.filter((port) => {
+    const info = port.getInfo();
+    const usbDevice = usbDevices.find((device) => (
+      device.vendorId === info.usbVendorId && device.productId === info.usbProductId
+    ));
+    const usbName = `${usbDevice?.manufacturerName || ''} ${usbDevice?.productName || ''}`;
+    const hasGohoName = /GOHO/i.test(usbName);
+    const hasGohoId = info.usbVendorId === GOHO_USB_VENDOR_ID && info.usbProductId === GOHO_USB_PRODUCT_ID;
+    return hasGohoName || hasGohoId;
+  });
+  return matches[0];
+}
+
+async function closeCurrentSerialPort() {
+  await stopReading();
+  if (serialWriter) {
+    try { serialWriter.releaseLock(); } catch { /* already released */ }
+    serialWriter = undefined;
+  }
+  if (serialPort) {
+    try { await serialPort.close(); } catch { /* device may already be disconnected */ }
+    serialPort = undefined;
+  }
+}
+
+async function connectGohoSerialAutomatically() {
+  if (!('serial' in navigator)) throw new Error(browserMessage('Web Serial'));
+  let port = await findAuthorizedGohoSerialPort();
+  if (!port) {
+    // The browser requires one user-approved chooser the first time. The
+    // filter keeps the chooser limited to the GOHO CDC VID/PID.
+    port = await navigator.serial.requestPort({
+      filters: [{ usbVendorId: GOHO_USB_VENDOR_ID, usbProductId: GOHO_USB_PRODUCT_ID }],
+    });
+  }
+  if (serialPort === port && serialWriter && serialPort.readable) return serialPort;
+  if (serialPort) await closeCurrentSerialPort();
+  serialPort = port;
+  if (!serialPort.readable) await serialPort.open({ baudRate: Number(baudRate.value) });
+  serialWriter = serialPort.writable.getWriter();
+  monitorPanel.hidden = false;
+  serialButton.textContent = '断开串口';
+  const usbId = serialPortUsbId(serialPort);
+  serialStatus.textContent = `已自动连接：${portName(serialPort)}${usbId ? ` · USB ${usbId}` : ''}，等待数据`;
+  updateVirtualDiskModeToggle();
+  addMessage(`自动连接 GOHO CDC：${portName(serialPort)}${usbId ? ` · USB ${usbId}` : ''}`);
+  readSerial();
+  return serialPort;
+}
+
+enterVirtualDiskButton.addEventListener('click', async () => {
+  enterVirtualDiskButton.disabled = true;
+  setVirtualDiskStatus('正在自动寻找名称含 GOHO 的 CDC 设备…');
+  try {
+    await connectGohoSerialAutomatically();
+    await sendVirtualDiskCommand();
+  } catch (error) {
+    setVirtualDiskStatus(error.name === 'NotFoundError'
+      ? '未找到 GOHO CDC 设备；首次使用请在浏览器授权窗口中选择它'
+      : `一键进入失败：${error.message || error}`);
+  } finally {
+    enterVirtualDiskButton.disabled = false;
+    updateVirtualDiskModeToggle();
+  }
+});
 
 serialButton.addEventListener('click', async () => {
   if (!('serial' in navigator)) {
