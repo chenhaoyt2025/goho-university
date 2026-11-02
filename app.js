@@ -2041,6 +2041,19 @@ async function closeCurrentSerialPort() {
   }
 }
 
+async function handleSerialPortDisconnect(port) {
+  if (serialPort !== port) return;
+  try { await stopReading(); } catch { /* the device is already gone */ }
+  if (serialWriter) {
+    try { serialWriter.releaseLock(); } catch { /* already released */ }
+    serialWriter = undefined;
+  }
+  serialPort = undefined;
+  serialButton.textContent = '选择 CDC 设备';
+  serialStatus.textContent = 'CDC 设备已断开';
+  setAudioStatus('USB Audio / CDC 设备已断开，请检查固件或 USB 连接');
+}
+
 async function connectGohoSerialAutomatically() {
   if (!('serial' in navigator)) throw new Error(browserMessage('Web Serial'));
   let port = await findAuthorizedGohoSerialPort();
@@ -2166,7 +2179,10 @@ if ('usb' in navigator) {
 }
 if ('serial' in navigator) {
   navigator.serial.addEventListener('connect', refreshSerialDevices);
-  navigator.serial.addEventListener('disconnect', refreshSerialDevices);
+  navigator.serial.addEventListener('disconnect', (event) => {
+    void handleSerialPortDisconnect(event.target);
+    void refreshSerialDevices();
+  });
 }
 
 function initSpaceScene() {
