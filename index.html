@@ -79,22 +79,23 @@
                 <div class="panel-signal"><span></span> WORLD / MSC</div>
                 <div class="panel-icon">▱</div>
                 <h3 id="virtual-disk-title">虚拟磁盘烧录</h3>
-                <p>先连接 CDC 并打开开关，设备会进入 GOHO UPDATE；再把应用 BIN 拖进去。</p>
+                <p>连接 CDC 后打开开关，设备自动进入 GOHO UPDATE；固件可先选好或直接拖入。</p>
               </div>
               <div class="disk-actions">
+                <button class="button button-primary" id="enterVirtualDiskButton" type="button">一键进入 GOHO UPDATE</button>
                 <label class="disk-mode-switch" for="virtualDiskModeToggle">
                   <span>虚拟磁盘烧录</span>
                   <input id="virtualDiskModeToggle" type="checkbox" role="switch" disabled />
                   <i aria-hidden="true"></i>
                 </label>
-                <button class="button button-primary" id="virtualDiskButton" type="button">选择虚拟磁盘</button>
+                <button class="button button-secondary" id="virtualDiskButton" type="button" hidden>绑定 GOHO UPDATE</button>
                 <input id="virtualDiskFile" type="file" accept=".bin,.BIN" hidden />
                 <div class="disk-drop-zone" id="virtualDiskDropZone" role="button" tabindex="0" aria-disabled="true">
-                  <strong>将应用 BIN 拖到这里</strong>
+                  <strong>拖入或点击选择应用 BIN</strong>
                   <small>自动写入 UPDATE.BIN · 仅支持应用镜像</small>
                 </div>
                 <progress id="virtualDiskProgress" value="0" max="100" hidden></progress>
-                <span class="disk-file-name" id="virtualDiskFileName">未连接虚拟磁盘</span>
+                <span class="disk-file-name" id="virtualDiskFileName">等待 GOHO UPDATE</span>
                 <span class="card-status" id="virtualDiskStatus">先连接 CDC，打开虚拟磁盘烧录</span>
               </div>
             </article>
