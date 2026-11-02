@@ -910,6 +910,30 @@ async function sendVirtualDiskCommand() {
   return mounted;
 }
 
+async function chooseVirtualDiskFirmwareFile() {
+  if (virtualDiskBusy) return;
+  if (typeof window.showOpenFilePicker === 'function') {
+    try {
+      const [fileHandle] = await window.showOpenFilePicker({
+        id: 'goho-update-firmware',
+        multiple: false,
+        excludeAcceptAllOption: true,
+        types: [{
+          description: 'BIN 固件',
+          accept: { 'application/octet-stream': ['.bin'] },
+        }],
+      });
+      await loadVirtualDiskFile(await fileHandle.getFile());
+    } catch (error) {
+      if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
+        setVirtualDiskStatus(`选择 BIN 失败：${error.message || error}`);
+      }
+    }
+    return;
+  }
+  virtualDiskFile.click();
+}
+
 virtualDiskButton.addEventListener('click', chooseVirtualDisk);
 virtualDiskFile.addEventListener('change', () => {
   const file = virtualDiskFile.files?.[0];
@@ -917,12 +941,12 @@ virtualDiskFile.addEventListener('change', () => {
   void loadVirtualDiskFile(file);
 });
 virtualDiskDropZone.addEventListener('click', () => {
-  if (!virtualDiskBusy) virtualDiskFile.click();
+  if (!virtualDiskBusy) void chooseVirtualDiskFirmwareFile();
 });
 virtualDiskDropZone.addEventListener('keydown', (event) => {
   if ((event.key === 'Enter' || event.key === ' ') && !virtualDiskBusy) {
     event.preventDefault();
-    virtualDiskFile.click();
+    void chooseVirtualDiskFirmwareFile();
   }
 });
 ['dragenter', 'dragover'].forEach((eventName) => {
