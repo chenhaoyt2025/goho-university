@@ -38,6 +38,11 @@ const audioStatus = document.querySelector('#audioStatus');
 const bleMidiConnectButton = document.querySelector('#bleMidiConnectButton');
 const bleMidiDisconnectButton = document.querySelector('#bleMidiDisconnectButton');
 const bleMidiDeviceName = document.querySelector('#bleMidiDeviceName');
+const espWifiScanButton = document.querySelector('#espWifiScanButton');
+const espWifiNetworkSelect = document.querySelector('#espWifiNetworkSelect');
+const espWifiPassword = document.querySelector('#espWifiPassword');
+const espWifiSaveButton = document.querySelector('#espWifiSaveButton');
+const espWifiStatus = document.querySelector('#espWifiStatus');
 const linkNetworkState = document.querySelector('#linkNetworkState');
 const linkPeerCount = document.querySelector('#linkPeerCount');
 const linkPlayState = document.querySelector('#linkPlayState');
@@ -128,6 +133,9 @@ let linkLastClockTime = 0;
 let linkClockPulses = 0;
 let linkClockIntervals = [];
 let linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
+let espWifiState = { configured: false, started: false, connected: false, ssid: '', ip: '' };
+let espWifiNetworks = [];
+let espWifiScanExpected = 0;
 let linkLastDeviceBeat = -1;
 
 function formatBytes(bytes) {
@@ -1328,6 +1336,7 @@ function updateLinkUi() {
   linkMetronomeButton.textContent = linkMetronomeEnabled ? 'METRONOME ON' : 'METRONOME OFF';
   linkMetronomeButton.classList.toggle('is-active', linkMetronomeEnabled);
   linkMetronomeButton.setAttribute('aria-pressed', String(linkMetronomeEnabled));
+  updateEspWifiUi();
 }
 
 function bleMidiTimestamp() {
@@ -1430,8 +1439,114 @@ function parseUint16LE(bytes, offset) {
   return bytes[offset] | (bytes[offset + 1] << 8);
 }
 
+function setEspWifiStatus(message) {
+  espWifiStatus.textContent = message;
+}
+
+function updateEspWifiUi() {
+  const bridgeReady = Boolean(linkBridgeCharacteristic);
+  espWifiScanButton.disabled = !bridgeReady;
+  espWifiNetworkSelect.disabled = !bridgeReady || !espWifiNetworks.length;
+  espWifiPassword.disabled = !bridgeReady;
+  espWifiSaveButton.disabled = !bridgeReady || !espWifiNetworkSelect.value;
+
+  if (!bridgeReady) {
+    setEspWifiStatus('先连接 ESP32 的 BLE MIDI');
+    return;
+  }
+  if (espWifiState.connected) {
+    setEspWifiStatus(`已连接 ${espWifiState.ssid || 'WiFi'}${espWifiState.ip ? ` · ${espWifiState.ip}` : ''}`);
+  } else if (espWifiState.started) {
+    setEspWifiStatus(`正在连接 ${espWifiState.ssid || 'WiFi'}…`);
+  } else if (espWifiState.ssid) {
+    setEspWifiStatus(`已保存 ${espWifiState.ssid} · 未连接`);
+  } else {
+    setEspWifiStatus('尚未配置 WiFi');
+  }
+}
+
+function renderEspWifiNetworks() {
+  const previousValue = espWifiNetworkSelect.value;
+  espWifiNetworkSelect.replaceChildren();
+  if (!espWifiNetworks.length) {
+    espWifiNetworkSelect.append(new Option('先点击扫描 WiFi', ''));
+  } else {
+    espWifiNetworkSelect.append(new Option('选择 WiFi 网络', ''));
+    espWifiNetworks.forEach(({ ssid, rssi }) => {
+      const signal = Number.isFinite(rssi) ? ` · ${rssi} dBm` : '';
+      espWifiNetworkSelect.append(new Option(`${ssid}${signal}`, ssid));
+    });
+  }
+  if (espWifiNetworks.some(({ ssid }) => ssid === previousValue)) {
+    espWifiNetworkSelect.value = previousValue;
+  }
+  updateEspWifiUi();
+}
+
+function handleEspWifiStatus(bytes) {
+  if (bytes.length < 4) return;
+  const flags = bytes[1];
+  const ssidLength = bytes[2];
+  const ipLength = bytes[3];
+  const end = 4 + ssidLength + ipLength;
+  if (end > bytes.length) return;
+  const decoder = new TextDecoder();
+  espWifiState = {
+    configured: Boolean(flags & 0x01),
+    started: Boolean(flags & 0x02),
+    connected: Boolean(flags & 0x04),
+    ssid: decoder.decode(bytes.slice(4, 4 + ssidLength)),
+    ip: decoder.decode(bytes.slice(4 + ssidLength, end)),
+  };
+  updateEspWifiUi();
+}
+
+function handleEspWifiScan(bytes) {
+  if (bytes.length < 5) return;
+  const index = bytes[1];
+  const total = bytes[2];
+  const rssi = bytes[3] > 127 ? bytes[3] - 256 : bytes[3];
+  const ssidLength = bytes[4];
+  if (5 + ssidLength > bytes.length) return;
+  if (index === 0 || total !== espWifiScanExpected) espWifiNetworks = [];
+  espWifiScanExpected = total;
+  const ssid = new TextDecoder().decode(bytes.slice(5, 5 + ssidLength));
+  if (ssid) espWifiNetworks[index] = { ssid, rssi };
+  espWifiNetworks = espWifiNetworks.filter(Boolean);
+  renderEspWifiNetworks();
+  if (total === 0) setEspWifiStatus('没有发现 WiFi 网络');
+  else if (espWifiNetworks.length >= total) setEspWifiStatus(`发现 ${total} 个 WiFi 网络`);
+}
+
+function handleEspWifiResult(bytes) {
+  if (bytes.length < 2) return;
+  const messages = {
+    0: 'WiFi 操作已完成',
+    1: 'WiFi 扫描启动失败',
+    2: 'WiFi 扫描失败',
+    3: 'WiFi 名称或密码格式不正确',
+    4: 'WiFi 配置保存失败',
+    5: 'WiFi 连接启动失败',
+  };
+  const message = messages[bytes[1]] || `WiFi 操作失败 (${bytes[1]})`;
+  setEspWifiStatus(message);
+}
+
 function handleLinkBridgeStatus(value) {
   const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (!bytes.length) return;
+  if (bytes[0] === 0xa2) {
+    handleEspWifiStatus(bytes);
+    return;
+  }
+  if (bytes[0] === 0xa3) {
+    handleEspWifiScan(bytes);
+    return;
+  }
+  if (bytes[0] === 0xa4) {
+    handleEspWifiResult(bytes);
+    return;
+  }
   if (bytes.length < 7 || bytes[0] !== LINK_BRIDGE_STATUS_MAGIC) return;
   const flags = bytes[1];
   const phase = parseUint16LE(bytes, 5) / 1000;
@@ -1569,6 +1684,10 @@ function handleBleMidiDisconnect() {
   bleMidiServer = undefined;
   bleMidiDevice = undefined;
   linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
+  espWifiState = { configured: false, started: false, connected: false, ssid: '', ip: '' };
+  espWifiNetworks = [];
+  espWifiScanExpected = 0;
+  renderEspWifiNetworks();
   linkLastDeviceBeat = -1;
   setLinkPlaying(false);
   linkPeerCount.textContent = '—';
@@ -1638,6 +1757,44 @@ async function disconnectBleMidi() {
 
 bleMidiConnectButton.addEventListener('click', () => void connectBleMidi());
 bleMidiDisconnectButton.addEventListener('click', () => void disconnectBleMidi());
+espWifiScanButton.addEventListener('click', async () => {
+  if (!linkBridgeCharacteristic) return;
+  espWifiNetworks = [];
+  espWifiScanExpected = 0;
+  renderEspWifiNetworks();
+  setEspWifiStatus('正在扫描 WiFi…');
+  espWifiScanButton.disabled = true;
+  try {
+    await sendLinkBridgeCommand(0x10);
+  } catch (error) {
+    setEspWifiStatus(`WiFi 扫描失败：${error.message || error}`);
+    updateEspWifiUi();
+  }
+});
+espWifiNetworkSelect.addEventListener('change', () => updateEspWifiUi());
+espWifiSaveButton.addEventListener('click', async () => {
+  const ssid = espWifiNetworkSelect.value;
+  const password = espWifiPassword.value;
+  if (!ssid || !linkBridgeCharacteristic) return;
+  if (password.length > 64) {
+    setEspWifiStatus('密码不能超过 64 个字符');
+    return;
+  }
+  const ssidBytes = new TextEncoder().encode(ssid);
+  const passwordBytes = new TextEncoder().encode(password);
+  if (ssidBytes.length > 32 || passwordBytes.length > 64) {
+    setEspWifiStatus('WiFi 名称或密码过长');
+    return;
+  }
+  espWifiSaveButton.disabled = true;
+  setEspWifiStatus(`正在保存并连接 ${ssid}…`);
+  try {
+    await sendLinkBridgeCommand(0x11, [ssidBytes.length, ...ssidBytes, passwordBytes.length, ...passwordBytes]);
+  } catch (error) {
+    setEspWifiStatus(`WiFi 配置失败：${error.message || error}`);
+    updateEspWifiUi();
+  }
+});
 linkEnableButton.addEventListener('click', async () => {
   const enabled = !(linkBridgeCharacteristic && linkDeviceState.enabled);
   try {
@@ -1688,6 +1845,7 @@ linkTempoSlider.addEventListener('input', async () => {
     setBleLinkStatus(`发送 Tempo 失败：${error.message || error}`);
   }
 });
+renderEspWifiNetworks();
 updateLinkUi();
 
 async function readSerial() {

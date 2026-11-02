@@ -144,6 +144,17 @@
                   <button class="button button-ghost" id="bleMidiDisconnectButton" type="button" disabled>断开</button>
                   <span class="ble-midi-device" id="bleMidiDeviceName">未连接</span>
                 </div>
+                <div class="esp-wifi-config" aria-label="ESP32 WiFi 配置">
+                  <div class="esp-wifi-row">
+                    <button class="button button-ghost" id="espWifiScanButton" type="button" disabled>扫描 WiFi</button>
+                    <select id="espWifiNetworkSelect" aria-label="ESP32 WiFi 网络" disabled>
+                      <option value="">先连接 BLE MIDI</option>
+                    </select>
+                    <input id="espWifiPassword" type="password" autocomplete="off" placeholder="WiFi 密码" disabled />
+                    <button class="button button-secondary" id="espWifiSaveButton" type="button" disabled>保存并连接</button>
+                  </div>
+                  <span class="card-status" id="espWifiStatus">先连接 ESP32 的 BLE MIDI</span>
+                </div>
                 <div class="link-status-grid" aria-label="Ableton Link 状态">
                   <div><small>LINK</small><strong id="linkNetworkState">OFFLINE</strong></div>
                   <div><small>PEERS</small><strong id="linkPeerCount">—</strong></div>

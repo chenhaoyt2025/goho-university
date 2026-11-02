@@ -226,6 +226,11 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .ble-link-actions { display: grid; gap: 12px; min-width: 0; }
 .ble-midi-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ble-midi-device { min-width: 0; overflow: hidden; color: var(--muted); font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.esp-wifi-config { display: grid; gap: 7px; }
+.esp-wifi-row { display: grid; grid-template-columns: auto minmax(150px, 1fr) minmax(130px, .8fr) auto; gap: 8px; align-items: center; }
+.esp-wifi-row select, .esp-wifi-row input { min-width: 0; height: 38px; padding: 0 12px; border: 1px solid rgba(251, 141, 202, .2); border-radius: 999px; background: rgba(5, 7, 20, .58); color: var(--text); font: 11px var(--mono); }
+.esp-wifi-row input::placeholder { color: var(--muted); }
+.esp-wifi-row select:disabled, .esp-wifi-row input:disabled { cursor: not-allowed; opacity: .42; }
 .link-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .link-status-grid > div { display: grid; gap: 4px; min-width: 0; padding: 11px 12px; border: 1px solid rgba(251, 141, 202, .18); border-radius: 12px; background: rgba(5, 7, 20, .42); }
 .link-status-grid small { color: var(--muted); font: 9px var(--mono); letter-spacing: .1em; }
@@ -307,6 +312,8 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 @media (max-width: 520px) {
   .disk-actions, .audio-actions, .ble-link-actions { grid-template-columns: 1fr; }
   .disk-actions .button, .audio-actions .button, .audio-actions select { width: 100%; }
+  .esp-wifi-row { grid-template-columns: 1fr; }
+  .esp-wifi-row .button, .esp-wifi-row select, .esp-wifi-row input { width: 100%; }
   .audio-action-row { display: flex; }
   .audio-action-row .button { width: auto; flex: 1; }
   .link-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
