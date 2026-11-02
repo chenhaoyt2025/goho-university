@@ -29,9 +29,9 @@ const enterVirtualDiskButton = document.querySelector('#enterVirtualDiskButton')
 const audioRefreshButton = document.querySelector('#audioRefreshButton');
 const audioInputSelect = document.querySelector('#audioInputSelect');
 const audioChannelSummary = document.querySelector('#audioChannelSummary');
-const audioChannelMode = document.querySelector('#audioChannelMode');
-const audioChannelSelect = document.querySelector('#audioChannelSelect');
-const audioStartButton = document.querySelector('#audioStartButton');
+const audioMonoChannelSelect = document.querySelector('#audioMonoChannelSelect');
+const audioStereoChannelSelect = document.querySelector('#audioStereoChannelSelect');
+const audioMuteButton = document.querySelector('#audioMuteButton');
 const audioStopButton = document.querySelector('#audioStopButton');
 const audioVolume = document.querySelector('#audioVolume');
 const audioVolumeValue = document.querySelector('#audioVolumeValue');
@@ -92,6 +92,8 @@ let audioSource;
 let audioSplitter;
 let audioMerger;
 let audioGain;
+let audioMuted = false;
+let audioRoutingToken = 0;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -939,48 +941,76 @@ function updateAudioDeviceLabels() {
   });
 }
 
+function animateAudioWheel(select) {
+  select.classList.remove('is-spinning');
+  void select.offsetWidth;
+  select.classList.add('is-spinning');
+}
+
+function updateAudioWheelState() {
+  const hasChannels = Boolean(selectedAudioChannelInfo()?.availableChannels);
+  const monoSelected = Boolean(audioMonoChannelSelect.value);
+  const stereoSelected = Boolean(audioStereoChannelSelect.value);
+  const baseDisabled = !hasChannels;
+
+  if (monoSelected) {
+    audioStereoChannelSelect.value = '';
+  } else if (stereoSelected) {
+    audioMonoChannelSelect.value = '';
+  }
+
+  audioMonoChannelSelect.disabled = baseDisabled || stereoSelected;
+  audioStereoChannelSelect.disabled = baseDisabled || monoSelected;
+  audioMonoChannelSelect.closest('.audio-wheel-group')?.classList.toggle('is-disabled', audioMonoChannelSelect.disabled);
+  audioStereoChannelSelect.closest('.audio-wheel-group')?.classList.toggle('is-disabled', audioStereoChannelSelect.disabled);
+}
+
 function updateAudioChannelOptions() {
   const info = selectedAudioChannelInfo();
   const channelCount = info?.availableChannels || 0;
-  const stereoOption = audioChannelMode.options[1];
-  stereoOption.disabled = channelCount < 2;
-  if (channelCount < 2 && audioChannelMode.value === 'stereo') audioChannelMode.value = 'mono';
+  const previousMono = audioMonoChannelSelect.value;
+  const previousStereo = audioStereoChannelSelect.value;
 
-  audioChannelSelect.replaceChildren();
+  audioMonoChannelSelect.replaceChildren(new Option('OFF', ''));
+  audioStereoChannelSelect.replaceChildren(new Option('OFF', ''));
   if (!channelCount) {
-    audioChannelSelect.append(new Option('先检测输入通道', ''));
-    audioChannelMode.disabled = true;
-    audioChannelSelect.disabled = true;
-    audioStartButton.disabled = true;
+    updateAudioWheelState();
     return;
   }
 
-  const mode = audioChannelMode.value;
-  if (mode === 'mono') {
-    for (let channel = 1; channel <= channelCount; channel += 1) {
-      audioChannelSelect.append(new Option(`${channel}`, String(channel - 1)));
-    }
-  } else {
-    for (let first = 1; first + 1 <= channelCount; first += 2) {
-      audioChannelSelect.append(new Option(`${first}-${first + 1}`, String(first - 1)));
-    }
-    if (!audioChannelSelect.options.length) {
-      audioChannelSelect.append(new Option('没有完整双声道', ''));
-    }
+  for (let channel = 1; channel <= channelCount; channel += 1) {
+    audioMonoChannelSelect.append(new Option(`${channel}`, String(channel - 1)));
   }
-  audioChannelMode.disabled = false;
-  audioChannelSelect.disabled = !audioChannelSelect.options.length || !audioChannelSelect.value;
-  audioStartButton.disabled = !audioChannelSelect.value;
+  for (let first = 1; first + 1 <= channelCount; first += 2) {
+    audioStereoChannelSelect.append(new Option(`${first}-${first + 1}`, String(first - 1)));
+  }
+
+  if (Array.from(audioMonoChannelSelect.options).some((option) => option.value === previousMono)) {
+    audioMonoChannelSelect.value = previousMono;
+  }
+  if (Array.from(audioStereoChannelSelect.options).some((option) => option.value === previousStereo)) {
+    audioStereoChannelSelect.value = previousStereo;
+  }
+  updateAudioWheelState();
+}
+
+function applyAudioGain() {
+  if (audioGain) audioGain.gain.value = audioMuted ? 0 : Number(audioVolume.value) / 100;
+}
+
+function updateAudioMuteButton() {
+  audioMuteButton.classList.toggle('is-muted', audioMuted);
+  audioMuteButton.setAttribute('aria-pressed', String(audioMuted));
 }
 
 function updateAudioControls() {
   const running = Boolean(audioStream && audioContext && audioContext.state !== 'closed');
   audioRefreshButton.disabled = running;
   audioInputSelect.disabled = running || !audioInputDevices.length;
-  audioChannelMode.disabled = running || !selectedAudioChannelInfo()?.availableChannels;
-  audioChannelSelect.disabled = running || !audioChannelSelect.options.length || !audioChannelSelect.value;
-  audioStartButton.disabled = running || !audioInputSelect.value || !audioChannelSelect.value;
+  updateAudioWheelState();
   audioStopButton.disabled = !running;
+  audioMuteButton.disabled = !running;
+  updateAudioMuteButton();
 }
 
 function audioTrackInfo(track) {
@@ -1056,7 +1086,7 @@ async function probeAudioInput(deviceId) {
     const actual = info.actualChannels || info.availableChannels;
     const max = info.maxChannels && info.maxChannels !== actual ? `，浏览器上限 ${info.maxChannels}ch` : '';
     audioChannelSummary.textContent = `输入通道：${actual}ch${max} · 输出：电脑默认扬声器 2ch`;
-    setAudioStatus(`${audioInputSelect.selectedOptions[0]?.textContent || 'USB Audio'} 已检测到 ${info.availableChannels} 个输入通道，请选择单声道或双声道`);
+    setAudioStatus(`${audioInputSelect.selectedOptions[0]?.textContent || 'USB Audio'} · ${info.availableChannels}ch · 选择 MONO 或 STEREO`);
   } catch (error) {
     if (token === audioProbeToken) {
       audioChannelInfo.delete(deviceId);
@@ -1138,11 +1168,13 @@ async function stopUsbAudioMonitor() {
 async function startUsbAudioMonitor() {
   const deviceId = audioInputSelect.value;
   const info = selectedAudioChannelInfo();
-  const mode = audioChannelMode.value;
-  const startChannel = Number(audioChannelSelect.value);
+  const monoChannel = audioMonoChannelSelect.value === '' ? null : Number(audioMonoChannelSelect.value);
+  const stereoChannel = audioStereoChannelSelect.value === '' ? null : Number(audioStereoChannelSelect.value);
+  const mode = monoChannel !== null ? 'mono' : stereoChannel !== null ? 'stereo' : '';
+  const startChannel = mode === 'mono' ? monoChannel : stereoChannel;
   const requiredChannels = mode === 'stereo' ? startChannel + 2 : startChannel + 1;
-  if (!deviceId || !info || !Number.isInteger(startChannel) || requiredChannels < 1) {
-    setAudioStatus('请先扫描声卡并检测输入通道');
+  if (!deviceId || !info || !mode || !Number.isInteger(startChannel) || requiredChannels < 1) {
+    setAudioStatus('请选择 MONO 或 STEREO 通道');
     return;
   }
   const AudioContextConstructor = getAudioContextConstructor();
@@ -1150,8 +1182,7 @@ async function startUsbAudioMonitor() {
     setAudioStatus(browserMessage('Web Audio / AudioContext'));
     return;
   }
-  audioStartButton.disabled = true;
-  setAudioStatus(`正在打开 ${mode === 'stereo' ? '双声道' : '单声道'} 输入 ${mode === 'stereo' ? `${startChannel + 1}-${startChannel + 2}` : startChannel + 1}…`);
+  setAudioStatus(`正在打开 ${mode === 'stereo' ? 'STEREO' : 'MONO'} ${mode === 'stereo' ? `${startChannel + 1}-${startChannel + 2}` : startChannel + 1}…`);
   try {
     const requestedChannels = Math.max(info.availableChannels, requiredChannels);
     audioStream = await getAudioInputStream(deviceId, requestedChannels);
@@ -1176,7 +1207,7 @@ async function startUsbAudioMonitor() {
       audioSplitter.connect(audioMerger, startChannel + 1, 1);
     }
     audioGain = audioContext.createGain();
-    audioGain.gain.value = Number(audioVolume.value) / 100;
+    applyAudioGain();
     audioMerger.connect(audioGain);
     audioGain.connect(audioContext.destination);
     audioStream.getAudioTracks().forEach((track) => {
@@ -1185,8 +1216,8 @@ async function startUsbAudioMonitor() {
       }, { once: true });
     });
     const rate = settings.sampleRate ? ` · ${settings.sampleRate} Hz` : '';
-    const channelText = mode === 'mono' ? `通道 ${startChannel + 1}→L/R` : `通道 ${startChannel + 1}-${startChannel + 2}→L/R`;
-    audioChannelSummary.textContent = `输入通道：${actualChannels}ch · ${channelText} · 输出：电脑默认扬声器 2ch`;
+    const channelText = mode === 'mono' ? `MONO ${startChannel + 1}→L/R` : `STEREO ${startChannel + 1}-${startChannel + 2}→L/R`;
+    audioChannelSummary.textContent = `输入 ${actualChannels}ch · ${channelText} · 输出默认 2ch`;
     setAudioStatus(`正在监听：${audioInputSelect.selectedOptions[0]?.textContent || 'USB Audio'} · ${channelText}${rate}`);
   } catch (error) {
     await stopUsbAudioMonitor();
@@ -1196,23 +1227,42 @@ async function startUsbAudioMonitor() {
   }
 }
 
+async function applyAudioRouting() {
+  const token = ++audioRoutingToken;
+  if (!audioMonoChannelSelect.value && !audioStereoChannelSelect.value) {
+    if (audioStream) await stopUsbAudioMonitor();
+    setAudioStatus('选择 MONO 或 STEREO 通道后自动监听');
+    return;
+  }
+  if (audioStream) await stopUsbAudioMonitor();
+  if (token !== audioRoutingToken) return;
+  await startUsbAudioMonitor();
+}
+
 audioRefreshButton.addEventListener('click', () => void scanAudioInputs());
-audioStartButton.addEventListener('click', () => void startUsbAudioMonitor());
 audioStopButton.addEventListener('click', () => void stopUsbAudioMonitor());
+audioMuteButton.addEventListener('click', () => {
+  audioMuted = !audioMuted;
+  applyAudioGain();
+  updateAudioMuteButton();
+});
 audioInputSelect.addEventListener('change', () => {
   audioChannelInfo.delete(audioInputSelect.value);
   updateAudioChannelOptions();
   void probeAudioInput(audioInputSelect.value);
 });
-audioChannelMode.addEventListener('change', () => {
-  updateAudioChannelOptions();
-  updateAudioControls();
+[audioMonoChannelSelect, audioStereoChannelSelect].forEach((select) => {
+  select.addEventListener('change', () => {
+    animateAudioWheel(select);
+    updateAudioWheelState();
+    void applyAudioRouting();
+  });
 });
-audioChannelSelect.addEventListener('change', () => updateAudioControls());
 audioVolume.addEventListener('input', () => {
   audioVolumeValue.textContent = `${audioVolume.value}%`;
-  if (audioGain) audioGain.gain.value = Number(audioVolume.value) / 100;
+  applyAudioGain();
 });
+
 if (navigator.mediaDevices) {
   navigator.mediaDevices.addEventListener('devicechange', () => {
     if (!audioStream) void enumerateAudioInputs().then((devices) => {

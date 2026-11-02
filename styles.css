@@ -227,9 +227,20 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .audio-actions select { min-width: 0; height: 42px; padding: 0 34px 0 12px; border: 1px solid rgba(119, 231, 255, .28); border-radius: 999px; background: rgba(5, 7, 20, .72); color: var(--text); font: 11px var(--mono); }
 .audio-actions select:disabled { cursor: not-allowed; opacity: .5; }
 .audio-channel-summary { grid-column: 1 / -1; color: var(--muted); font: 10px var(--mono); letter-spacing: .03em; }
-.audio-channel-row { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(120px, .8fr) auto minmax(150px, 1.2fr); align-items: center; gap: 8px; color: var(--muted); font: 11px var(--mono); }
-.audio-channel-row select { width: 100%; }
+.audio-wheel-row { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.audio-wheel-group { display: grid; gap: 5px; min-width: 0; transition: opacity .2s ease, filter .2s ease; }
+.audio-wheel-group label { color: var(--muted); font: 10px var(--mono); letter-spacing: .12em; }
+.audio-wheel-group.is-disabled { opacity: .32; filter: saturate(.35); }
+.audio-wheel-select { width: 100%; min-height: 48px; padding: 0 34px 0 14px !important; border-radius: 12px !important; font-size: 13px !important; letter-spacing: .08em; }
+.audio-wheel-select.is-spinning { animation: audioWheelSpin .28s cubic-bezier(.2, .8, .2, 1); }
 .audio-action-row { display: flex; align-items: center; gap: 8px; }
+.audio-mute-button { min-width: 42px; padding-inline: 12px; color: var(--cyan); border-color: rgba(119, 231, 255, .38); font-weight: 700; }
+.audio-mute-button.is-muted { color: #ff7d9d; border-color: rgba(255, 125, 157, .72); background: rgba(255, 125, 157, .12); box-shadow: 0 0 18px rgba(255, 125, 157, .16); }
+@keyframes audioWheelSpin {
+  0% { transform: translateY(0) scaleY(1); }
+  45% { transform: translateY(-2px) scaleY(.96); }
+  100% { transform: translateY(0) scaleY(1); }
+}
 .audio-volume { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 11px var(--mono); }
 .audio-volume input { width: min(190px, 100%); accent-color: var(--cyan); }
 .audio-volume output { min-width: 34px; color: var(--text); text-align: right; }
@@ -275,6 +286,7 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
   .disk-actions, .audio-actions { grid-template-columns: 1fr; }
   .disk-mode-switch { justify-content: space-between; }
   .disk-actions .button, .audio-actions .button, .audio-actions select { width: 100%; }
-  .audio-action-row { display: grid; grid-template-columns: 1fr 1fr; }
+  .audio-action-row { display: flex; }
+  .audio-action-row .button { width: auto; flex: 1; }
   .disk-drop-zone, .disk-actions progress, .disk-file-name, .disk-actions .card-status { grid-column: auto; }
 }
