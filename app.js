@@ -1583,7 +1583,7 @@ async function connectBleMidi() {
     return;
   }
   bleMidiConnectButton.disabled = true;
-  setBleLinkStatus('请在浏览器设备窗口中选择 HOHO-C6…');
+  setBleLinkStatus('请在浏览器设备窗口中选择 HOHO 蓝牙设备…');
   try {
     bleMidiDevice = await navigator.bluetooth.requestDevice({
       filters: [{ services: [BLE_MIDI_SERVICE_UUID] }],
