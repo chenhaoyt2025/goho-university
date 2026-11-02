@@ -105,19 +105,31 @@
                 <div class="panel-signal"><span></span> WORLD / USB AUDIO</div>
                 <div class="panel-icon">◉</div>
                 <h3 id="usb-audio-title">USB 声卡监听</h3>
-                <p>选择模块的 USB Audio 输入，直接送到电脑当前默认声音设备。</p>
+                <p>显示声卡输入通道；按单声道或双声道选择，最后都输出到电脑左右两个喇叭。</p>
               </div>
               <div class="audio-actions">
                 <button class="button button-primary" id="audioRefreshButton" type="button">扫描 USB 声卡</button>
                 <select id="audioInputSelect" aria-label="USB 声卡输入" disabled>
                   <option value="">请先授权并扫描设备</option>
                 </select>
+                <div class="audio-channel-summary" id="audioChannelSummary">输入通道：等待检测 · 输出：电脑默认扬声器 2ch</div>
+                <div class="audio-channel-row">
+                  <label for="audioChannelMode">模式</label>
+                  <select id="audioChannelMode" aria-label="通道模式" disabled>
+                    <option value="mono">单声道</option>
+                    <option value="stereo">双声道</option>
+                  </select>
+                  <label for="audioChannelSelect">通道</label>
+                  <select id="audioChannelSelect" aria-label="输入通道" disabled>
+                    <option value="">先选择声卡</option>
+                  </select>
+                </div>
                 <div class="audio-action-row">
                   <button class="button button-secondary" id="audioStartButton" type="button" disabled>开始监听</button>
                   <button class="button button-ghost" id="audioStopButton" type="button" disabled>停止</button>
                 </div>
                 <label class="audio-volume" for="audioVolume">监听音量 <input id="audioVolume" type="range" min="0" max="100" value="80" /><output id="audioVolumeValue">80%</output></label>
-                <span class="card-status" id="audioStatus">等待选择 USB Audio 输入 · 输出到电脑默认声音设备</span>
+                <span class="card-status" id="audioStatus">等待选择 USB Audio 输入 · 单声道会复制到电脑左右两个喇叭</span>
               </div>
             </article>
 
