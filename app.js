@@ -32,7 +32,6 @@ const audioChannelSummary = document.querySelector('#audioChannelSummary');
 const audioMonoChannelSelect = document.querySelector('#audioMonoChannelSelect');
 const audioStereoChannelSelect = document.querySelector('#audioStereoChannelSelect');
 const audioMuteButton = document.querySelector('#audioMuteButton');
-const audioStopButton = document.querySelector('#audioStopButton');
 const audioVolume = document.querySelector('#audioVolume');
 const audioVolumeValue = document.querySelector('#audioVolumeValue');
 const audioModeButtons = Array.from(document.querySelectorAll('[data-audio-command]'));
@@ -1060,7 +1059,6 @@ function updateAudioControls() {
   audioOutputSelect.disabled = !audioInputDevices.length;
   updateAudioWheelState();
   updateAudioModeButtons();
-  audioStopButton.disabled = !running;
   audioMuteButton.disabled = !running;
   updateAudioMuteButton();
 }
@@ -1357,7 +1355,6 @@ async function applyAudioRouting() {
 }
 
 audioRefreshButton.addEventListener('click', () => void scanAudioInputs());
-audioStopButton.addEventListener('click', () => void stopUsbAudioMonitor());
 audioMuteButton.addEventListener('click', () => {
   audioMuted = !audioMuted;
   applyAudioGain();
