@@ -95,51 +95,85 @@
               </div>
             </article>
 
-            <article class="world-panel world-panel-audio" id="usb-audio" aria-labelledby="usb-audio-title">
-              <div class="audio-copy">
-                <div class="panel-signal"><span></span> WORLD / USB AUDIO</div>
-                <div class="panel-icon">◉</div>
-                <h3 id="usb-audio-title">USB 声卡监听</h3>
-                <p>选择输入通道、USB 音频模式和声音输出设备。</p>
-              </div>
-              <div class="audio-actions">
-                <button class="button button-primary" id="audioRefreshButton" type="button">扫描 USB 声卡</button>
-                <select id="audioInputSelect" aria-label="USB 声卡输入" disabled>
-                  <option value="">请先授权并扫描设备</option>
-                </select>
-                <select id="audioOutputSelect" aria-label="声音输出设备" disabled>
-                  <option value="">系统默认声音设备</option>
-                </select>
-                <div class="audio-channel-summary" id="audioChannelSummary">输入通道：等待检测 · 输出：系统默认声音设备 2ch</div>
-                <div class="audio-wheel-row" aria-label="输入通道选择">
-                  <div class="audio-wheel-group">
-                    <label for="audioMonoChannelSelect">MONO</label>
-                    <select class="audio-wheel-select" id="audioMonoChannelSelect" aria-label="单声道输入通道" disabled>
-                      <option value="">OFF</option>
-                    </select>
-                  </div>
-                  <div class="audio-wheel-group">
-                    <label for="audioStereoChannelSelect">STEREO</label>
-                    <select class="audio-wheel-select" id="audioStereoChannelSelect" aria-label="双声道输入通道" disabled>
-                      <option value="">OFF</option>
-                    </select>
+            <div class="control-deck" id="cdc-audio-deck">
+              <article class="world-panel world-panel-serial" id="serial" aria-labelledby="serial-title">
+                <div class="panel-signal"><span></span> WORLD / CDC</div>
+                <div class="panel-icon">⌁</div>
+                <h3 id="serial-title">Serial Monitor</h3>
+                <p>连接 CDC 设备，实时查看输出并发送调试指令。</p>
+                <div class="serial-controls">
+                  <label>Baud rate <select id="baudRate"><option>115200</option><option>57600</option><option>38400</option><option>9600</option></select></label>
+                  <button class="button button-secondary" id="serialButton" type="button">选择 CDC 设备</button>
+                </div>
+                <span class="card-status" id="serialStatus">尚未连接</span>
+                <span class="serial-routing-note">USB MODE 和 REV 会复用此 CDC；未连接时会自动连接。要给其他软件使用，先点击断开串口。</span>
+
+              <div class="monitor" id="monitorPanel" hidden>
+                <div class="monitor-header">
+                  <span>LIVE SERIAL OUTPUT <strong id="monitorState">STOPPED</strong></span>
+                  <div class="monitor-actions">
+                    <label>接收 <select id="receiveFormat"><option value="text">TXT</option><option value="hex">HEX</option></select></label>
+                    <button class="text-button" id="startMonitor" type="button">Start</button>
+                    <button class="text-button" id="stopMonitor" type="button">Stop</button>
+                    <button class="text-button" id="clearLog" type="button">清空</button>
                   </div>
                 </div>
-                <div class="audio-command-row" aria-label="USB 音频源模式">
-                  <span class="audio-command-label">USB MODE</span>
-                  <button class="button button-ghost audio-mode-button" data-audio-command="USB" type="button" aria-pressed="false">USB</button>
-                  <button class="button button-ghost audio-mode-button" data-audio-command="LINE" type="button" aria-pressed="false">LINE</button>
-                  <button class="button button-ghost audio-mode-button" data-audio-command="SYNTH" type="button" aria-pressed="false">SYNTH</button>
-                  <button class="button button-ghost audio-mode-button is-active" data-audio-command="OFF" type="button" aria-pressed="true">OFF</button>
-                </div>
-                <label class="audio-reverb" for="audioRevSlider">REV <input id="audioRevSlider" type="range" min="0" max="100" value="0" /><output id="audioRevValue">0</output></label>
-                <div class="audio-action-row">
-                  <button class="button button-ghost audio-mute-button" id="audioMuteButton" type="button" aria-label="静音" aria-pressed="false" disabled>M</button>
-                </div>
-                <label class="audio-volume" for="audioVolume">监听音量 <input id="audioVolume" type="range" min="0" max="100" value="33" /><output id="audioVolumeValue">33%</output></label>
-                <span class="card-status" id="audioStatus">等待选择 USB Audio 输入 · 选择通道后自动监听</span>
+                <pre id="serialLog" aria-live="polite">等待串口数据…</pre>
+                <form class="send-row" id="sendForm">
+                  <select id="sendFormat" aria-label="Send format"><option value="text">TXT</option><option value="hex">HEX</option></select>
+                  <select id="lineEnding" aria-label="Line ending"><option value="none">无结尾</option><option value="lf">LF</option><option value="crlf">CRLF</option></select>
+                  <input id="sendInput" placeholder="TXT 文本，或 HEX：01 03 00 00" autocomplete="off" />
+                  <button class="button button-primary" type="submit">发送 ↗</button>
+                </form>
               </div>
-            </article>
+              </article>
+
+              <article class="world-panel world-panel-audio" id="usb-audio" aria-labelledby="usb-audio-title">
+                <div class="audio-copy">
+                  <div class="panel-signal"><span></span> WORLD / USB AUDIO</div>
+                  <div class="panel-icon">◉</div>
+                  <h3 id="usb-audio-title">USB 声卡监听</h3>
+                  <p>选择输入通道、USB 音频模式和声音输出设备。</p>
+                </div>
+                <div class="audio-actions">
+                  <button class="button button-primary" id="audioRefreshButton" type="button">扫描 USB 声卡</button>
+                  <select id="audioInputSelect" aria-label="USB 声卡输入" disabled>
+                    <option value="">请先授权并扫描设备</option>
+                  </select>
+                  <select id="audioOutputSelect" aria-label="声音输出设备" disabled>
+                    <option value="">系统默认声音设备</option>
+                  </select>
+                  <div class="audio-channel-summary" id="audioChannelSummary">输入通道：等待检测 · 输出：系统默认声音设备 2ch</div>
+                  <div class="audio-wheel-row" aria-label="输入通道选择">
+                    <div class="audio-wheel-group">
+                      <label for="audioMonoChannelSelect">MONO</label>
+                      <select class="audio-wheel-select" id="audioMonoChannelSelect" aria-label="单声道输入通道" disabled>
+                        <option value="">OFF</option>
+                      </select>
+                    </div>
+                    <div class="audio-wheel-group">
+                      <label for="audioStereoChannelSelect">STEREO</label>
+                      <select class="audio-wheel-select" id="audioStereoChannelSelect" aria-label="双声道输入通道" disabled>
+                        <option value="">OFF</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="audio-command-row" aria-label="USB 音频源模式">
+                    <span class="audio-command-label">USB MODE</span>
+                    <button class="button button-ghost audio-mode-button" data-audio-command="USB" type="button" aria-pressed="false">USB</button>
+                    <button class="button button-ghost audio-mode-button" data-audio-command="LINE" type="button" aria-pressed="false">LINE</button>
+                    <button class="button button-ghost audio-mode-button" data-audio-command="SYNTH" type="button" aria-pressed="false">SYNTH</button>
+                    <button class="button button-ghost audio-mode-button is-active" data-audio-command="OFF" type="button" aria-pressed="true">OFF</button>
+                  </div>
+                  <label class="audio-reverb" for="audioRevSlider">REV <input id="audioRevSlider" type="range" min="0" max="100" value="0" /><output id="audioRevValue">0</output></label>
+                  <div class="audio-action-row">
+                    <button class="button button-ghost audio-mute-button" id="audioMuteButton" type="button" aria-label="静音" aria-pressed="false" disabled>M</button>
+                  </div>
+                  <label class="audio-volume" for="audioVolume">监听音量 <input id="audioVolume" type="range" min="0" max="100" value="33" /><output id="audioVolumeValue">33%</output></label>
+                  <span class="card-status" id="audioStatus">等待选择 USB Audio 输入 · 选择通道后自动监听</span>
+                </div>
+              </article>
+            </div>
 
             <article class="world-panel world-panel-ble-link" id="ble-link" aria-labelledby="ble-link-title">
               <div class="ble-link-copy">
@@ -185,37 +219,8 @@
               </div>
             </article>
 
-            <article class="world-panel world-panel-serial" id="serial" aria-labelledby="serial-title">
-              <div class="panel-signal"><span></span> WORLD / CDC</div>
-              <div class="panel-icon">⌁</div>
-              <h3 id="serial-title">Serial Monitor</h3>
-              <p>连接 CDC 设备，实时查看输出并发送调试指令。</p>
-              <div class="serial-controls">
-                <label>Baud rate <select id="baudRate"><option>115200</option><option>57600</option><option>38400</option><option>9600</option></select></label>
-                <button class="button button-secondary" id="serialButton" type="button">选择 CDC 设备</button>
-              </div>
-              <span class="card-status" id="serialStatus">尚未连接</span>
-            </article>
           </div>
 
-          <div class="monitor" id="monitorPanel" hidden>
-            <div class="monitor-header">
-              <span>LIVE SERIAL OUTPUT <strong id="monitorState">STOPPED</strong></span>
-              <div class="monitor-actions">
-                <label>接收 <select id="receiveFormat"><option value="text">TXT</option><option value="hex">HEX</option></select></label>
-                <button class="text-button" id="startMonitor" type="button">Start</button>
-                <button class="text-button" id="stopMonitor" type="button">Stop</button>
-                <button class="text-button" id="clearLog" type="button">清空</button>
-              </div>
-            </div>
-            <pre id="serialLog" aria-live="polite">等待串口数据…</pre>
-            <form class="send-row" id="sendForm">
-              <select id="sendFormat" aria-label="Send format"><option value="text">TXT</option><option value="hex">HEX</option></select>
-              <select id="lineEnding" aria-label="Line ending"><option value="none">无结尾</option><option value="lf">LF</option><option value="crlf">CRLF</option></select>
-              <input id="sendInput" placeholder="TXT 文本，或 HEX：01 03 00 00" autocomplete="off" />
-              <button class="button button-primary" type="submit">发送 ↗</button>
-            </form>
-          </div>
         </section>
 
         <section class="worlds-section" id="products" aria-labelledby="worlds-title">
