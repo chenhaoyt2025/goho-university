@@ -8,7 +8,8 @@ GOHO University 产品与在线硬件工具的第一版静态网页原型。
 - WebUSB 授权设备列表、BIN/HEX 固件文件选择、STM32 DfuSe DFU 烧录
 - GOHO UPDATE 虚拟磁盘烧录：首次绑定一次固定卷标 `GOHO UPDATE`；一键自动寻找 GOHO CDC、发送 `XXX`，并自动连接虚拟磁盘；可提前选择或拖入 application-only `.BIN`
 - Web Serial 授权 CDC/串口设备列表、Start/Stop、TXT/HEX 接收与发送、LF/CRLF 行尾
-- Web Audio USB 声卡监听：检测输入通道数，使用互斥的 MONO / STEREO 通道滚轮选择；选择后自动监听，默认音量 33%，支持 Mute；单声道复制到电脑左右两个默认扬声器，双声道分别送到左右扬声器
+- Web Audio USB 声卡监听：检测输入通道数，使用互斥的 MONO / STEREO 通道滚轮选择；选择后自动监听，默认音量 33%，支持 Mute；单声道复制到左右输出，双声道分别送到左右输出。
+- USB 声卡控制：通过 GOHO CDC 自动发送 `USB`、`LINE`、`SYNTH`、`OFF`；`REV 0..100` 使用滑条发送混响命令；可选择系统默认或其他声音输出设备（浏览器需支持 Web Audio `setSinkId`）。
 - BLE MIDI：通过 Web Bluetooth 搜索“HOHO 蓝牙设备”，发送 MIDI Start/Stop、MIDI Clock 和 CC1 Tempo。
 - ESP32 Link 桥接：网页通过 BLE 读取/控制 ESP32 内部的 Ableton Link 状态；网页本身不是原生 Ableton Link Peer。
 - ESP32 WiFi 配置：可在 BLE 连接后扫描 WiFi、选择网络、输入密码并保存到 ESP32 NVS，设备随后自动尝试连接。

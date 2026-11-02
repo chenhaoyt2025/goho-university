@@ -27,6 +27,7 @@ const virtualDiskStatus = document.querySelector('#virtualDiskStatus');
 const enterVirtualDiskButton = document.querySelector('#enterVirtualDiskButton');
 const audioRefreshButton = document.querySelector('#audioRefreshButton');
 const audioInputSelect = document.querySelector('#audioInputSelect');
+const audioOutputSelect = document.querySelector('#audioOutputSelect');
 const audioChannelSummary = document.querySelector('#audioChannelSummary');
 const audioMonoChannelSelect = document.querySelector('#audioMonoChannelSelect');
 const audioStereoChannelSelect = document.querySelector('#audioStereoChannelSelect');
@@ -34,6 +35,9 @@ const audioMuteButton = document.querySelector('#audioMuteButton');
 const audioStopButton = document.querySelector('#audioStopButton');
 const audioVolume = document.querySelector('#audioVolume');
 const audioVolumeValue = document.querySelector('#audioVolumeValue');
+const audioModeButtons = Array.from(document.querySelectorAll('[data-audio-command]'));
+const audioRevSlider = document.querySelector('#audioRevSlider');
+const audioRevValue = document.querySelector('#audioRevValue');
 const audioStatus = document.querySelector('#audioStatus');
 const bleMidiConnectButton = document.querySelector('#bleMidiConnectButton');
 const bleMidiDisconnectButton = document.querySelector('#bleMidiDisconnectButton');
@@ -109,8 +113,11 @@ let virtualDiskPollToken = 0;
 let virtualDiskReady = false;
 let pendingVirtualDiskFile;
 let audioInputDevices = [];
+let audioOutputDevices = [];
 let audioChannelInfo = new Map();
 let audioProbeToken = 0;
+let audioRevSendTimer;
+let audioSourceMode = 'OFF';
 let audioStream;
 let audioContext;
 let audioSource;
@@ -954,6 +961,29 @@ function audioDeviceLabel(device, index) {
   return `${device.label || `USB Audio 输入 ${index + 1}`}${channels}`;
 }
 
+function audioOutputDeviceLabel(device, index) {
+  return device.label || `声音输出设备 ${index + 1}`;
+}
+
+function selectedAudioOutputLabel() {
+  return audioOutputSelect.value
+    ? (audioOutputSelect.selectedOptions[0]?.textContent || '其他声音设备')
+    : '系统默认声音设备';
+}
+
+function renderAudioOutputDevices() {
+  const previous = audioOutputSelect.value;
+  audioOutputSelect.replaceChildren(new Option('系统默认声音设备', ''));
+  audioOutputDevices.forEach((device, index) => {
+    audioOutputSelect.append(new Option(audioOutputDeviceLabel(device, index), device.deviceId));
+  });
+  if (audioOutputDevices.some((device) => device.deviceId === previous)) {
+    audioOutputSelect.value = previous;
+  } else {
+    audioOutputSelect.value = '';
+  }
+}
+
 function updateAudioDeviceLabels() {
   Array.from(audioInputSelect.options).forEach((option, index) => {
     const device = audioInputDevices[index];
@@ -1027,7 +1057,9 @@ function updateAudioControls() {
   const running = Boolean(audioStream && audioContext && audioContext.state !== 'closed');
   audioRefreshButton.disabled = running;
   audioInputSelect.disabled = running || !audioInputDevices.length;
+  audioOutputSelect.disabled = !audioInputDevices.length;
   updateAudioWheelState();
+  updateAudioModeButtons();
   audioStopButton.disabled = !running;
   audioMuteButton.disabled = !running;
   updateAudioMuteButton();
@@ -1078,11 +1110,28 @@ async function enumerateAudioInputs() {
   return devices.filter((device) => device.kind === 'audioinput');
 }
 
+async function enumerateAudioOutputs() {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices.filter((device) => device.kind === 'audiooutput' && device.deviceId !== 'default');
+}
+
+async function refreshAudioOutputs() {
+  try {
+    audioOutputDevices = await enumerateAudioOutputs();
+    renderAudioOutputDevices();
+    updateAudioControls();
+  } catch {
+    audioOutputDevices = [];
+    renderAudioOutputDevices();
+  }
+}
+
 async function probeAudioInput(deviceId) {
   if (!deviceId || !navigator.mediaDevices?.getUserMedia) return;
   const token = ++audioProbeToken;
   setAudioStatus('正在检测所选声卡的输入通道…');
-  audioChannelSummary.textContent = '输入通道：检测中 · 输出：电脑默认扬声器 2ch';
+  audioChannelSummary.textContent = `输入通道：检测中 · 输出：${selectedAudioOutputLabel()} 2ch`;
   updateAudioControls();
   let probeStream;
   try {
@@ -1105,19 +1154,64 @@ async function probeAudioInput(deviceId) {
     updateAudioChannelOptions();
     const actual = info.actualChannels || info.availableChannels;
     const max = info.maxChannels && info.maxChannels !== actual ? `，浏览器上限 ${info.maxChannels}ch` : '';
-    audioChannelSummary.textContent = `输入通道：${actual}ch${max} · 输出：电脑默认扬声器 2ch`;
+    audioChannelSummary.textContent = `输入通道：${actual}ch${max} · 输出：${selectedAudioOutputLabel()} 2ch`;
     setAudioStatus(`${audioInputSelect.selectedOptions[0]?.textContent || 'USB Audio'} · ${info.availableChannels}ch · 选择 MONO 或 STEREO`);
   } catch (error) {
     if (token === audioProbeToken) {
       audioChannelInfo.delete(deviceId);
       updateAudioChannelOptions();
-      audioChannelSummary.textContent = '输入通道：检测失败 · 输出：电脑默认扬声器 2ch';
+      audioChannelSummary.textContent = `输入通道：检测失败 · 输出：${selectedAudioOutputLabel()} 2ch`;
       setAudioStatus(`通道检测失败：${error.message || error}`);
     }
   } finally {
     probeStream?.getTracks().forEach((track) => track.stop());
     if (token === audioProbeToken) updateAudioControls();
   }
+}
+
+async function setAudioOutputDevice(deviceId = audioOutputSelect.value) {
+  if (!audioContext || typeof audioContext.setSinkId !== 'function') {
+    if (deviceId) throw new Error('当前浏览器不支持选择声音输出设备');
+    return;
+  }
+  await audioContext.setSinkId(deviceId || '');
+}
+
+function updateAudioModeButtons() {
+  audioModeButtons.forEach((button) => {
+    const active = button.dataset.audioCommand === audioSourceMode;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+async function sendUsbAudioCommand(command) {
+  if (!('serial' in navigator)) throw new Error(browserMessage('Web Serial'));
+  if (!serialWriter) await connectGohoSerialAutomatically();
+  if (!serialWriter) throw new Error('GOHO CDC 串口尚未连接');
+  const bytes = new TextEncoder().encode(`${command}\r\n`);
+  await serialWriter.write(bytes);
+  addBytes('>', bytes);
+  if (/^(USB|LINE|SYNTH|OFF)$/.test(command)) {
+    audioSourceMode = command;
+    if (command === 'OFF') {
+      audioRevSlider.value = '0';
+      audioRevValue.textContent = '0';
+    }
+    updateAudioModeButtons();
+  }
+  setAudioStatus(`已发送 ${command} · ${serialPort ? portName(serialPort) : 'GOHO CDC'}`);
+}
+
+function queueAudioReverbCommand(immediate = false) {
+  const value = Math.max(0, Math.min(100, Number(audioRevSlider.value) || 0));
+  audioRevValue.textContent = String(value);
+  clearTimeout(audioRevSendTimer);
+  const send = () => void sendUsbAudioCommand(`REV ${value}`).catch((error) => {
+    setAudioStatus(`REV 发送失败：${error.message || error}`);
+  });
+  if (immediate) send();
+  else audioRevSendTimer = setTimeout(send, 100);
 }
 
 async function scanAudioInputs() {
@@ -1137,7 +1231,9 @@ async function scanAudioInputs() {
       },
     });
     audioInputDevices = await enumerateAudioInputs();
+    audioOutputDevices = await enumerateAudioOutputs();
     audioChannelInfo.clear();
+    renderAudioOutputDevices();
     audioInputSelect.replaceChildren();
     audioInputDevices.forEach((device, index) => {
       audioInputSelect.append(new Option(audioDeviceLabel(device, index), device.deviceId));
@@ -1182,7 +1278,7 @@ async function stopUsbAudioMonitor() {
     audioContext = undefined;
   }
   updateAudioControls();
-  setAudioStatus('监听已停止 · 输出到电脑默认声音设备 2ch');
+  setAudioStatus(`监听已停止 · 输出 ${selectedAudioOutputLabel()} 2ch`);
 }
 
 async function startUsbAudioMonitor() {
@@ -1207,6 +1303,7 @@ async function startUsbAudioMonitor() {
     const requestedChannels = Math.max(info.availableChannels, requiredChannels);
     audioStream = await getAudioInputStream(deviceId, requestedChannels);
     audioContext = new AudioContextConstructor({ latencyHint: 'interactive' });
+    await setAudioOutputDevice(audioOutputSelect.value);
     await audioContext.resume();
     audioSource = audioContext.createMediaStreamSource(audioStream);
     const settings = audioStream.getAudioTracks()[0]?.getSettings?.() || {};
@@ -1237,8 +1334,8 @@ async function startUsbAudioMonitor() {
     });
     const rate = settings.sampleRate ? ` · ${settings.sampleRate} Hz` : '';
     const channelText = mode === 'mono' ? `MONO ${startChannel + 1}→L/R` : `STEREO ${startChannel + 1}-${startChannel + 2}→L/R`;
-    audioChannelSummary.textContent = `输入 ${actualChannels}ch · ${channelText} · 输出默认 2ch`;
-    setAudioStatus(`正在监听：${audioInputSelect.selectedOptions[0]?.textContent || 'USB Audio'} · ${channelText}${rate}`);
+    audioChannelSummary.textContent = `输入 ${actualChannels}ch · ${channelText} · 输出 ${selectedAudioOutputLabel()} 2ch`;
+    setAudioStatus(`正在监听：${audioInputSelect.selectedOptions[0]?.textContent || 'USB Audio'} · ${channelText} · ${selectedAudioOutputLabel()}${rate}`);
   } catch (error) {
     await stopUsbAudioMonitor();
     setAudioStatus(`打开 USB Audio 失败：${error.message || error}`);
@@ -1278,6 +1375,30 @@ audioInputSelect.addEventListener('change', () => {
     void applyAudioRouting();
   });
 });
+audioOutputSelect.addEventListener('change', async () => {
+  try {
+    await setAudioOutputDevice(audioOutputSelect.value);
+    audioChannelSummary.textContent = audioChannelSummary.textContent.replace(/输出 [^·]+/, `输出 ${selectedAudioOutputLabel()}`);
+    if (audioStream) setAudioStatus(`监听输出已切换：${selectedAudioOutputLabel()}`);
+  } catch (error) {
+    setAudioStatus(`输出设备切换失败：${error.message || error}`);
+  }
+});
+audioModeButtons.forEach((button) => {
+  button.addEventListener('click', async () => {
+    audioModeButtons.forEach((item) => { item.disabled = true; });
+    try {
+      await sendUsbAudioCommand(button.dataset.audioCommand);
+    } catch (error) {
+      setAudioStatus(`命令发送失败：${error.message || error}`);
+    } finally {
+      audioModeButtons.forEach((item) => { item.disabled = false; });
+      updateAudioModeButtons();
+    }
+  });
+});
+audioRevSlider.addEventListener('input', () => queueAudioReverbCommand(false));
+audioRevSlider.addEventListener('change', () => queueAudioReverbCommand(true));
 audioVolume.addEventListener('input', () => {
   audioVolumeValue.textContent = `${audioVolume.value}%`;
   applyAudioGain();
@@ -1285,22 +1406,26 @@ audioVolume.addEventListener('input', () => {
 
 if (navigator.mediaDevices) {
   navigator.mediaDevices.addEventListener('devicechange', () => {
-    if (!audioStream) void enumerateAudioInputs().then((devices) => {
-      const previousId = audioInputSelect.value;
-      audioInputDevices = devices;
+    if (audioStream) return;
+    void Promise.all([enumerateAudioInputs(), enumerateAudioOutputs()]).then(([inputs, outputs]) => {
+      const previousInput = audioInputSelect.value;
+      audioInputDevices = inputs;
+      audioOutputDevices = outputs;
       audioInputSelect.replaceChildren();
       audioInputDevices.forEach((device, index) => {
         audioInputSelect.append(new Option(audioDeviceLabel(device, index), device.deviceId));
       });
-      if (audioInputDevices.some((device) => device.deviceId === previousId)) {
-        audioInputSelect.value = previousId;
+      if (audioInputDevices.some((device) => device.deviceId === previousInput)) {
+        audioInputSelect.value = previousInput;
       }
+      renderAudioOutputDevices();
       updateAudioChannelOptions();
       updateAudioControls();
     }).catch(() => {});
   });
 }
 updateAudioChannelOptions();
+renderAudioOutputDevices();
 updateAudioControls();
 
 

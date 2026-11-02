@@ -100,14 +100,17 @@
                 <div class="panel-signal"><span></span> WORLD / USB AUDIO</div>
                 <div class="panel-icon">◉</div>
                 <h3 id="usb-audio-title">USB 声卡监听</h3>
-                <p>选择输入通道，声音输出到电脑默认左右扬声器。</p>
+                <p>选择输入通道、USB 音频模式和声音输出设备。</p>
               </div>
               <div class="audio-actions">
                 <button class="button button-primary" id="audioRefreshButton" type="button">扫描 USB 声卡</button>
                 <select id="audioInputSelect" aria-label="USB 声卡输入" disabled>
                   <option value="">请先授权并扫描设备</option>
                 </select>
-                <div class="audio-channel-summary" id="audioChannelSummary">输入通道：等待检测 · 输出：电脑默认扬声器 2ch</div>
+                <select id="audioOutputSelect" aria-label="声音输出设备" disabled>
+                  <option value="">系统默认声音设备</option>
+                </select>
+                <div class="audio-channel-summary" id="audioChannelSummary">输入通道：等待检测 · 输出：系统默认声音设备 2ch</div>
                 <div class="audio-wheel-row" aria-label="输入通道选择">
                   <div class="audio-wheel-group">
                     <label for="audioMonoChannelSelect">MONO</label>
@@ -122,6 +125,14 @@
                     </select>
                   </div>
                 </div>
+                <div class="audio-command-row" aria-label="USB 音频源模式">
+                  <span class="audio-command-label">USB MODE</span>
+                  <button class="button button-ghost audio-mode-button" data-audio-command="USB" type="button" aria-pressed="false">USB</button>
+                  <button class="button button-ghost audio-mode-button" data-audio-command="LINE" type="button" aria-pressed="false">LINE</button>
+                  <button class="button button-ghost audio-mode-button" data-audio-command="SYNTH" type="button" aria-pressed="false">SYNTH</button>
+                  <button class="button button-ghost audio-mode-button is-active" data-audio-command="OFF" type="button" aria-pressed="true">OFF</button>
+                </div>
+                <label class="audio-reverb" for="audioRevSlider">REV <input id="audioRevSlider" type="range" min="0" max="100" value="0" /><output id="audioRevValue">0</output></label>
                 <div class="audio-action-row">
                   <button class="button button-ghost audio-mute-button" id="audioMuteButton" type="button" aria-label="静音" aria-pressed="false" disabled>M</button>
                   <button class="button button-ghost" id="audioStopButton" type="button" disabled>停止</button>

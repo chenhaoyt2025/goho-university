@@ -262,6 +262,13 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
 .audio-actions select { min-width: 0; height: 42px; padding: 0 34px 0 12px; border: 1px solid rgba(119, 231, 255, .28); border-radius: 999px; background: rgba(5, 7, 20, .72); color: var(--text); font: 11px var(--mono); }
 .audio-actions select:disabled { cursor: not-allowed; opacity: .5; }
 .audio-channel-summary { grid-column: 1 / -1; color: var(--muted); font: 10px var(--mono); letter-spacing: .03em; }
+.audio-command-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.audio-command-label { margin-right: 3px; color: var(--muted); font: 10px var(--mono); letter-spacing: .12em; }
+.audio-mode-button { min-width: 54px; min-height: 34px; padding-inline: 12px; border-color: rgba(119, 231, 255, .24); }
+.audio-mode-button.is-active { border-color: rgba(119, 231, 255, .8); background: rgba(119, 231, 255, .16); color: var(--cyan); box-shadow: 0 0 16px rgba(119, 231, 255, .12); }
+.audio-reverb { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: var(--muted); font: 10px var(--mono); letter-spacing: .12em; }
+.audio-reverb input { width: min(260px, 100%); accent-color: var(--cyan); }
+.audio-reverb output { min-width: 28px; color: var(--text); text-align: right; }
 .audio-wheel-row { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .audio-wheel-group { display: grid; gap: 5px; min-width: 0; transition: opacity .2s ease, filter .2s ease; }
 .audio-wheel-group label { color: var(--muted); font: 10px var(--mono); letter-spacing: .12em; }
