@@ -58,6 +58,38 @@ const linkTempoSlider = document.querySelector('#linkTempoSlider');
 const linkTempoSliderValue = document.querySelector('#linkTempoSliderValue');
 const linkBeatGrid = document.querySelector('#linkBeatGrid');
 const bleLinkStatus = document.querySelector('#bleLinkStatus');
+const tabButtons = Array.from(document.querySelectorAll('[data-tab-target]'));
+const tabPanels = Array.from(document.querySelectorAll('[data-tab-panel]'));
+const worldTabs = Object.freeze({
+  tools: 'update',
+  eurorack: 'update',
+  satellite: 'update',
+  fx: 'usb',
+  vst: 'usb',
+  max: 'ble',
+  macos: 'ble',
+  neutron: 'ble',
+});
+
+function activateTab(name) {
+  const target = tabButtons.some((button) => button.dataset.tabTarget === name) ? name : 'update';
+  tabButtons.forEach((button) => {
+    const active = button.dataset.tabTarget === target;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  tabPanels.forEach((panel) => {
+    const active = panel.dataset.tabPanel === target;
+    panel.classList.toggle('is-active', active);
+    panel.hidden = !active;
+  });
+  document.body.dataset.activeTab = target;
+}
+
+tabButtons.forEach((button) => {
+  button.addEventListener('click', () => activateTab(button.dataset.tabTarget));
+});
+activateTab('update');
 
 const DFU = {
   DNLOAD: 0x01,
@@ -2272,6 +2304,8 @@ function initSpaceScene() {
     uniform vec3 uColor;
     uniform vec3 uLight;
     uniform float uGlow;
+    uniform float uSelected;
+    uniform float uPulse;
     varying vec3 vNormal;
     varying vec3 vWorld;
     void main() {
@@ -2282,6 +2316,8 @@ function initSpaceScene() {
       float rim = pow(1.0 - max(dot(viewDirection, normal), 0.0), 2.4);
       vec3 color = uColor * (0.16 + diffuse * 0.92);
       color += vec3(0.24, 0.38, 0.7) * rim * uGlow;
+      float pulse = uSelected * (0.42 + 0.16 * sin(uPulse * 0.004));
+      color += mix(vec3(0.15, 0.32, 0.68), vec3(0.62, 0.84, 1.0), rim) * pulse;
       gl_FragColor = vec4(color, 1.0);
     }
   `;
@@ -2381,6 +2417,8 @@ function initSpaceScene() {
     color: gl.getUniformLocation(bodyProgram, 'uColor'),
     light: gl.getUniformLocation(bodyProgram, 'uLight'),
     glow: gl.getUniformLocation(bodyProgram, 'uGlow'),
+    selected: gl.getUniformLocation(bodyProgram, 'uSelected'),
+    pulse: gl.getUniformLocation(bodyProgram, 'uPulse'),
   };
   const starAttributes = {
     position: gl.getAttribLocation(starProgram, 'aPosition'),
@@ -2456,8 +2494,14 @@ function initSpaceScene() {
   let height = 0;
   let yaw = 0;
   let pitch = 0;
+  const pitchLimit = Math.PI / 6;
+  let yawVelocity = 0;
+  let pitchVelocity = 0;
+  let selectedBody = null;
+  let focusTarget = null;
   let dragging = false;
   let moved = false;
+  let suppressClick = false;
   let lastX = 0;
   let lastY = 0;
   let projection = identity();
@@ -2470,6 +2514,7 @@ function initSpaceScene() {
       const label = document.createElement('span');
       label.className = `world-label world-label-${body.key}`;
       label.textContent = body.label;
+      label.setAttribute('aria-hidden', 'true');
       labelLayer.append(label);
       body.labelElement = label;
     });
@@ -2505,6 +2550,7 @@ function initSpaceScene() {
       const point = transformPoint(viewProjection, [body.position[0], body.position[1] + body.radius * 1.35, body.position[2]]);
       const visible = point.w > 0 && point.z > -point.w && point.z < point.w && point.x > -point.w && point.x < point.w && point.y > -point.w && point.y < point.w;
       body.labelElement.hidden = !visible;
+      body.labelElement.classList.toggle('is-selected', body === selectedBody);
       if (visible) {
         const x = (point.x / point.w * .5 + .5) * width;
         const y = (-point.y / point.w * .5 + .5) * height;
@@ -2530,8 +2576,10 @@ function initSpaceScene() {
     backgroundContext.fillStyle = nebula;
     backgroundContext.fillRect(0, 0, width, height);
 
-    const driftX = yaw * width * .035;
-    const driftY = pitch * height * .035;
+    const idleDriftX = Math.sin(time * 0.00008) * width * .012 + time * 0.00012;
+    const idleDriftY = Math.cos(time * 0.00006) * height * .006;
+    const driftX = yaw * width * .012 + idleDriftX;
+    const driftY = pitch * height * .012 + idleDriftY;
     for (let index = 0; index < 900; index += 1) {
       const x = ((index * 83.17 + driftX) % (width + 40) + width + 40) % (width + 40) - 20;
       const y = ((index * 47.91 + driftY) % (height + 40) + height + 40) % (height + 40) - 20;
@@ -2545,10 +2593,43 @@ function initSpaceScene() {
     }
     backgroundContext.fillStyle = 'rgba(255, 255, 255, .055)';
     backgroundContext.fillRect(0, height * .5, width, 1);
-    void time;
+  }
+
+  function angleDelta(target, current) {
+    return Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  }
+
+  function updateFlightMotion(time) {
+    if (focusTarget) {
+      yaw += angleDelta(focusTarget.yaw, yaw) * .075;
+      pitch += (focusTarget.pitch - pitch) * .075;
+      yawVelocity *= .72;
+      pitchVelocity *= .72;
+      if (Math.abs(angleDelta(focusTarget.yaw, yaw)) < .001 && Math.abs(focusTarget.pitch - pitch) < .001) {
+        yaw = focusTarget.yaw;
+        pitch = focusTarget.pitch;
+      }
+      return;
+    }
+
+    if (dragging) return;
+    yaw += yawVelocity;
+    pitch = Math.max(-pitchLimit, Math.min(pitchLimit, pitch + pitchVelocity));
+    yawVelocity *= .92;
+    pitchVelocity *= .88;
+    if (Math.abs(yawVelocity) < .00001) {
+      yawVelocity = 0;
+      yaw += .00012;
+    }
+    if (Math.abs(pitchVelocity) < .00001) pitchVelocity = 0;
+    if (Math.abs(pitchVelocity) < .00001) {
+      pitch += Math.sin(time * .00015) * .00003;
+      pitch = Math.max(-pitchLimit, Math.min(pitchLimit, pitch));
+    }
   }
 
   function render(time) {
+    updateFlightMotion(time);
     draw2DBackground(time);
     updateCamera();
     gl.clearColor(0, 0, 0, 0);
@@ -2571,6 +2652,8 @@ function initSpaceScene() {
       gl.uniformMatrix4fv(bodyUniforms.model, false, modelMatrix(body.position, body.radius));
       gl.uniform3fv(bodyUniforms.color, body.color);
       gl.uniform1f(bodyUniforms.glow, body.glow);
+      gl.uniform1f(bodyUniforms.selected, body === selectedBody ? 1 : 0);
+      gl.uniform1f(bodyUniforms.pulse, time);
       gl.drawElements(gl.TRIANGLES, sphere.count, gl.UNSIGNED_SHORT, 0);
     });
     updateLabels();
@@ -2580,9 +2663,14 @@ function initSpaceScene() {
   function focusWorld(key) {
     const body = bodies.find((item) => item.key === key);
     if (!body) return;
-    yaw = Math.atan2(-body.position[0], -body.position[2]);
-    pitch = Math.atan2(body.position[1], Math.hypot(body.position[0], body.position[2]));
-    document.querySelector(body.target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    selectedBody = body;
+    focusTarget = {
+      yaw: Math.atan2(-body.position[0], -body.position[2]),
+      pitch: Math.max(-pitchLimit, Math.min(pitchLimit, -Math.atan2(body.position[1], Math.hypot(body.position[0], body.position[2])))),
+    };
+    yawVelocity = 0;
+    pitchVelocity = 0;
+    activateTab(worldTabs[body.key] || 'update');
   }
 
   function screenPosition(body) {
@@ -2599,38 +2687,58 @@ function initSpaceScene() {
     return Boolean(target?.closest('a, button, input, select, textarea, label, form'));
   }
 
-  document.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || isInteractiveTarget(event.target)) return;
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
     event.preventDefault();
     dragging = true;
     moved = false;
     dragDistance = 0;
+    yawVelocity = 0;
+    pitchVelocity = 0;
     lastX = event.clientX;
     lastY = event.clientY;
+    try { canvas.setPointerCapture(event.pointerId); } catch { /* pointer capture is optional */ }
     document.body.classList.add('is-dragging');
   });
-  document.addEventListener('selectstart', (event) => {
-    if (dragging) event.preventDefault();
-  });
-  document.addEventListener('pointermove', (event) => {
+  canvas.addEventListener('pointermove', (event) => {
     if (!dragging) return;
+    event.preventDefault();
     const dx = event.clientX - lastX;
     const dy = event.clientY - lastY;
     if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
     dragDistance += Math.abs(dx) + Math.abs(dy);
-    yaw += dx * .0045;
-    pitch = Math.max(-Math.PI / 2 + .08, Math.min(Math.PI / 2 - .08, pitch + dy * .0045));
+    const sensitivity = .00235;
+    const yawDelta = -dx * sensitivity;
+    const pitchDelta = -dy * sensitivity;
+    yaw += yawDelta;
+    pitch = Math.max(-pitchLimit, Math.min(pitchLimit, pitch + pitchDelta));
+    yawVelocity = yawDelta;
+    pitchVelocity = pitchDelta;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 3) {
+      focusTarget = null;
+      selectedBody = null;
+    }
     lastX = event.clientX;
     lastY = event.clientY;
   });
-  document.addEventListener('pointerup', () => {
+  function endDrag(event) {
+    if (!dragging) return;
     dragging = false;
     document.body.classList.remove('is-dragging');
     if (dragDistance > 8) document.querySelector('.status-pill')?.replaceChildren(Object.assign(document.createElement('i'), { className: '' }), document.createTextNode(' 3D FLIGHT'));
+    suppressClick = dragDistance > 8;
+    window.setTimeout(() => { suppressClick = false; }, 120);
     dragDistance = 0;
-  });
-  document.addEventListener('click', (event) => {
-    if (moved || isInteractiveTarget(event.target)) return;
+    try { canvas.releasePointerCapture(event.pointerId); } catch { /* pointer capture is optional */ }
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('click', (event) => {
+    if (suppressClick) {
+      suppressClick = false;
+      return;
+    }
     updateCamera();
     const hit = bodies.map((body) => ({ body, position: screenPosition(body) })).filter((item) => item.position).sort((a, b) => a.position.radius - b.position.radius).find(({ position }) => Math.hypot(event.clientX - position.x, event.clientY - position.y) < position.radius + 18);
     if (hit) focusWorld(hit.body.key);
@@ -2640,7 +2748,7 @@ function initSpaceScene() {
   });
   window.addEventListener('resize', resize);
   resize();
-  render();
+  render(performance.now());
 }
 try {
   initSpaceScene();
