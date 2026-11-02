@@ -24,7 +24,6 @@ const virtualDiskDropZone = document.querySelector('#virtualDiskDropZone');
 const virtualDiskProgress = document.querySelector('#virtualDiskProgress');
 const virtualDiskFileName = document.querySelector('#virtualDiskFileName');
 const virtualDiskStatus = document.querySelector('#virtualDiskStatus');
-const virtualDiskModeToggle = document.querySelector('#virtualDiskModeToggle');
 const enterVirtualDiskButton = document.querySelector('#enterVirtualDiskButton');
 const audioRefreshButton = document.querySelector('#audioRefreshButton');
 const audioInputSelect = document.querySelector('#audioInputSelect');
@@ -36,6 +35,21 @@ const audioStopButton = document.querySelector('#audioStopButton');
 const audioVolume = document.querySelector('#audioVolume');
 const audioVolumeValue = document.querySelector('#audioVolumeValue');
 const audioStatus = document.querySelector('#audioStatus');
+const bleMidiConnectButton = document.querySelector('#bleMidiConnectButton');
+const bleMidiDisconnectButton = document.querySelector('#bleMidiDisconnectButton');
+const bleMidiDeviceName = document.querySelector('#bleMidiDeviceName');
+const linkNetworkState = document.querySelector('#linkNetworkState');
+const linkPeerCount = document.querySelector('#linkPeerCount');
+const linkPlayState = document.querySelector('#linkPlayState');
+const linkEnableButton = document.querySelector('#linkEnableButton');
+const linkTempoValue = document.querySelector('#linkTempoValue');
+const linkPlayButton = document.querySelector('#linkPlayButton');
+const linkStopButton = document.querySelector('#linkStopButton');
+const linkMetronomeButton = document.querySelector('#linkMetronomeButton');
+const linkTempoSlider = document.querySelector('#linkTempoSlider');
+const linkTempoSliderValue = document.querySelector('#linkTempoSliderValue');
+const linkBeatGrid = document.querySelector('#linkBeatGrid');
+const bleLinkStatus = document.querySelector('#bleLinkStatus');
 
 const DFU = {
   DNLOAD: 0x01,
@@ -68,6 +82,12 @@ const VIRTUAL_DISK_MOUNT_TIMEOUT_MS = 20000;
 const VIRTUAL_DISK_HANDLE_DB = 'goho-university-device-handles';
 const VIRTUAL_DISK_HANDLE_STORE = 'handles';
 const VIRTUAL_DISK_HANDLE_KEY = 'goho-update-root';
+const BLE_MIDI_SERVICE_UUID = '03b80e5a-ede8-4b33-a751-6ce34ec4c700';
+const BLE_MIDI_CHARACTERISTIC_UUID = '7772e5db-3868-4112-a1a9-f2669d106bf3';
+const LINK_BRIDGE_CHARACTERISTIC_UUID = '9c5d3f2a-0d8e-4a0f-9a5d-4f7e9b0c22a1';
+const LINK_BRIDGE_STATUS_MAGIC = 0xa1;
+const LINK_TEMPO_MIN = 30;
+const LINK_TEMPO_MAX = 300;
 
 let usbDevices = [];
 let selectedUsbDevice;
@@ -94,6 +114,21 @@ let audioMerger;
 let audioGain;
 let audioMuted = false;
 let audioRoutingToken = 0;
+let bleMidiDevice;
+let bleMidiServer;
+let bleMidiCharacteristic;
+let linkBridgeCharacteristic;
+let linkTempo = 120;
+let linkPlaying = false;
+let linkMetronomeEnabled = false;
+let linkBeatIndex = 0;
+let linkBeatTimer;
+let linkAudioContext;
+let linkLastClockTime = 0;
+let linkClockPulses = 0;
+let linkClockIntervals = [];
+let linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
+let linkLastDeviceBeat = -1;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -471,14 +506,6 @@ function setVirtualDiskStatus(message) {
   virtualDiskStatus.textContent = message;
 }
 
-function updateVirtualDiskModeToggle() {
-  const connected = Boolean(serialPort && serialWriter);
-  virtualDiskModeToggle.disabled = !connected || virtualDiskBusy;
-  if (!connected && virtualDiskModeToggle.checked) {
-    virtualDiskModeToggle.checked = false;
-  }
-}
-
 function setVirtualDiskBindingPrompt(visible, label = '绑定 GOHO UPDATE') {
   virtualDiskButton.hidden = !visible;
   virtualDiskButton.textContent = label;
@@ -794,7 +821,6 @@ async function loadVirtualDiskFile(file) {
       virtualDiskReady = false;
       setVirtualDiskReady(false);
       setVirtualDiskBindingPrompt(false);
-      virtualDiskModeToggle.checked = false;
       virtualDiskFileName.textContent = '设备已退出 GOHO UPDATE';
       setVirtualDiskStatus('设备已退出，正在写入 Flash 并自动重启');
     } else {
@@ -818,7 +844,6 @@ async function loadVirtualDiskFile(file) {
     virtualDiskBusy = false;
     virtualDiskDropZone.classList.remove('is-busy', 'is-over');
     setVirtualDiskReady(virtualDiskReady);
-    updateVirtualDiskModeToggle();
   }
 }
 
@@ -871,19 +896,6 @@ async function sendVirtualDiskCommand() {
   return mounted;
 }
 
-virtualDiskModeToggle.addEventListener('change', async () => {
-  if (!virtualDiskModeToggle.checked) return;
-  virtualDiskModeToggle.disabled = true;
-  setVirtualDiskStatus('正在通过 CDC 发送 XXX…');
-  try {
-    await sendVirtualDiskCommand();
-  } catch (error) {
-    virtualDiskModeToggle.checked = false;
-    setVirtualDiskStatus(`进入虚拟磁盘失败：${error.message || error}`);
-  } finally {
-    updateVirtualDiskModeToggle();
-  }
-});
 virtualDiskButton.addEventListener('click', chooseVirtualDisk);
 virtualDiskFile.addEventListener('change', () => {
   const file = virtualDiskFile.files?.[0];
@@ -1283,6 +1295,401 @@ if (navigator.mediaDevices) {
 updateAudioChannelOptions();
 updateAudioControls();
 
+
+function setBleLinkStatus(message) {
+  bleLinkStatus.textContent = message;
+}
+
+function updateLinkUi() {
+  const connected = Boolean(bleMidiCharacteristic);
+  const bridgeReady = Boolean(linkBridgeCharacteristic);
+  const linkEnabled = bridgeReady && linkDeviceState.enabled;
+  const networkState = !connected
+    ? 'OFFLINE'
+    : !bridgeReady
+      ? 'BLE MIDI'
+      : linkEnabled
+        ? (linkDeviceState.wifi ? 'LINK' : 'WAIT WIFI')
+        : 'OFF';
+
+  linkNetworkState.textContent = networkState;
+  linkPeerCount.textContent = bridgeReady && linkEnabled ? String(linkDeviceState.peers) : '—';
+  linkPlayState.textContent = linkPlaying ? 'PLAYING' : 'STOPPED';
+  linkTempoValue.textContent = String(Math.round(linkTempo));
+  linkTempoSliderValue.textContent = String(Math.round(linkTempo));
+  linkTempoSlider.value = String(Math.round(linkTempo));
+  bleMidiConnectButton.disabled = connected;
+  bleMidiDisconnectButton.disabled = !connected;
+  linkEnableButton.disabled = !connected;
+  linkEnableButton.textContent = bridgeReady && linkDeviceState.enabled ? 'LINK ON' : 'LINK OFF';
+  linkEnableButton.classList.toggle('is-active', bridgeReady && linkDeviceState.enabled);
+  linkPlayButton.disabled = !connected;
+  linkStopButton.disabled = !connected;
+  linkMetronomeButton.textContent = linkMetronomeEnabled ? 'METRONOME ON' : 'METRONOME OFF';
+  linkMetronomeButton.classList.toggle('is-active', linkMetronomeEnabled);
+  linkMetronomeButton.setAttribute('aria-pressed', String(linkMetronomeEnabled));
+}
+
+function bleMidiTimestamp() {
+  return Math.floor(performance.now()) & 0x1FFF;
+}
+
+function encodeBleMidiPacket(message) {
+  const timestamp = bleMidiTimestamp();
+  return Uint8Array.from([
+    0x80 | ((timestamp >> 7) & 0x3F),
+    0x80 | (timestamp & 0x7F),
+    ...message,
+  ]);
+}
+
+async function writeBleCharacteristic(characteristic, packet) {
+  if (!characteristic) return false;
+  if (characteristic.properties.writeWithoutResponse && characteristic.writeValueWithoutResponse) {
+    await characteristic.writeValueWithoutResponse(packet);
+  } else {
+    await characteristic.writeValue(packet);
+  }
+  return true;
+}
+
+async function sendBleMidiMessage(message) {
+  if (!bleMidiCharacteristic) {
+    setBleLinkStatus('请先连接 BLE MIDI');
+    return false;
+  }
+  return writeBleCharacteristic(bleMidiCharacteristic, encodeBleMidiPacket(message));
+}
+
+async function sendLinkBridgeCommand(command, payload = []) {
+  if (!linkBridgeCharacteristic) return false;
+  return writeBleCharacteristic(linkBridgeCharacteristic, Uint8Array.from([command, ...payload]));
+}
+
+function midiMessageLength(status) {
+  if (status >= 0xF8) return 1;
+  if (status === 0xF1 || status === 0xF3 || status === 0xF9 || status === 0xFD) return 2;
+  if (status === 0xF2) return 3;
+  const type = status & 0xF0;
+  if (type === 0xC0 || type === 0xD0) return 2;
+  if (type >= 0x80 && type <= 0xE0) return 3;
+  return 1;
+}
+
+function decodeBleMidiPacket(value) {
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (bytes.length < 2 || !(bytes[0] & 0x80)) return [];
+  const messages = [];
+  const timestampHigh = bytes[0] & 0x3F;
+  let runningStatus = 0;
+  let index = 1;
+  while (index < bytes.length) {
+    if (!(bytes[index] & 0x80)) {
+      index++;
+      continue;
+    }
+    const timestamp = (timestampHigh << 7) | (bytes[index] & 0x7F);
+    index++;
+    if (index >= bytes.length) break;
+    let status = bytes[index];
+    if (status >= 0xF8) {
+      messages.push({ timestamp, bytes: Uint8Array.of(status) });
+      index++;
+      continue;
+    }
+    if (status & 0x80) {
+      runningStatus = status;
+      index++;
+    } else if (!runningStatus) {
+      index++;
+      continue;
+    } else {
+      status = runningStatus;
+    }
+    const length = midiMessageLength(status);
+    const message = [status];
+    while (message.length < length && index < bytes.length) {
+      const byte = bytes[index];
+      if (byte & 0x80) {
+        if (byte >= 0xF8) {
+          messages.push({ timestamp, bytes: Uint8Array.of(byte) });
+          index++;
+          continue;
+        }
+        break;
+      }
+      message.push(byte);
+      index++;
+    }
+    if (message.length === length) messages.push({ timestamp, bytes: Uint8Array.from(message) });
+  }
+  return messages;
+}
+
+function parseUint16LE(bytes, offset) {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function handleLinkBridgeStatus(value) {
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (bytes.length < 7 || bytes[0] !== LINK_BRIDGE_STATUS_MAGIC) return;
+  const flags = bytes[1];
+  const phase = parseUint16LE(bytes, 5) / 1000;
+  linkDeviceState = {
+    enabled: Boolean(flags & 0x01),
+    wifi: Boolean(flags & 0x02),
+    playing: Boolean(flags & 0x04),
+    peers: bytes[2],
+    tempo: parseUint16LE(bytes, 3) / 10,
+    phase,
+  };
+  linkTempo = Math.max(LINK_TEMPO_MIN, Math.min(LINK_TEMPO_MAX, linkDeviceState.tempo || linkTempo));
+  linkPlaying = linkDeviceState.playing;
+  const beatIndex = Math.floor(phase) % 4;
+  if (linkPlaying && beatIndex !== linkLastDeviceBeat) {
+    linkLastDeviceBeat = beatIndex;
+    updateLinkBeat(beatIndex);
+    if (linkMetronomeEnabled) playMetronomeClick(beatIndex === 0);
+  } else if (!linkPlaying) {
+    linkLastDeviceBeat = -1;
+    updateLinkBeat(0);
+  }
+  const state = linkDeviceState.enabled
+    ? (linkDeviceState.wifi ? `LINK 已连接 · ${linkDeviceState.peers} 个设备` : 'LINK 已开启 · 等待 WiFi')
+    : 'BLE MIDI 已连接 · LINK 未开启';
+  setBleLinkStatus(state);
+  updateLinkUi();
+}
+
+function playMetronomeClick(accent) {
+  if (!linkMetronomeEnabled) return;
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) return;
+  if (!linkAudioContext) linkAudioContext = new AudioContextConstructor();
+  void linkAudioContext.resume();
+  const oscillator = linkAudioContext.createOscillator();
+  const gain = linkAudioContext.createGain();
+  oscillator.frequency.value = accent ? 1320 : 880;
+  gain.gain.setValueAtTime(accent ? 0.12 : 0.07, linkAudioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, linkAudioContext.currentTime + 0.045);
+  oscillator.connect(gain).connect(linkAudioContext.destination);
+  oscillator.start();
+  oscillator.stop(linkAudioContext.currentTime + 0.05);
+}
+
+function updateLinkBeat(index) {
+  linkBeatIndex = ((index % 4) + 4) % 4;
+  Array.from(linkBeatGrid.children).forEach((dot, dotIndex) => {
+    dot.classList.toggle('is-active', dotIndex === linkBeatIndex);
+  });
+}
+
+function stopLocalLinkBeat() {
+  if (linkBeatTimer) clearTimeout(linkBeatTimer);
+  linkBeatTimer = undefined;
+}
+
+function scheduleLocalLinkBeat() {
+  stopLocalLinkBeat();
+  if (!linkPlaying || linkBridgeCharacteristic) return;
+  const interval = 60000 / Math.max(LINK_TEMPO_MIN, Math.min(LINK_TEMPO_MAX, linkTempo));
+  updateLinkBeat(linkBeatIndex);
+  playMetronomeClick(linkBeatIndex === 0);
+  linkBeatTimer = setTimeout(() => {
+    linkBeatIndex = (linkBeatIndex + 1) % 4;
+    scheduleLocalLinkBeat();
+  }, interval);
+}
+
+function setLinkPlaying(playing, resetBeat = false) {
+  linkPlaying = playing;
+  if (resetBeat) updateLinkBeat(0);
+  if (linkPlaying && !linkBridgeCharacteristic) scheduleLocalLinkBeat();
+  else stopLocalLinkBeat();
+  updateLinkUi();
+}
+
+function updateTempoFromMidiClock() {
+  if (linkClockIntervals.length < 4) return;
+  const average = linkClockIntervals.reduce((sum, value) => sum + value, 0) / linkClockIntervals.length;
+  const bpm = 60000 / (average * 24);
+  if (Number.isFinite(bpm) && bpm >= LINK_TEMPO_MIN && bpm <= LINK_TEMPO_MAX) {
+    linkTempo = bpm;
+    updateLinkUi();
+  }
+}
+
+function handleBleMidiMessage(message) {
+  const bytes = message.bytes;
+  if (!bytes.length) return;
+  const status = bytes[0];
+  if (status === 0xF8) {
+    const now = performance.now();
+    if (linkLastClockTime > 0) {
+      const interval = now - linkLastClockTime;
+      if (interval > 5 && interval < 2000) {
+        linkClockIntervals.push(interval);
+        if (linkClockIntervals.length > 24) linkClockIntervals.shift();
+        updateTempoFromMidiClock();
+      }
+    }
+    linkLastClockTime = now;
+    linkClockPulses++;
+    updateLinkBeat(Math.floor(linkClockPulses / 24) % 4);
+    return;
+  }
+  if (status === 0xFA || status === 0xFB) {
+    linkClockPulses = status === 0xFA ? 0 : linkClockPulses;
+    linkLastClockTime = 0;
+    setLinkPlaying(true, status === 0xFA);
+    return;
+  }
+  if (status === 0xFC) {
+    setLinkPlaying(false);
+    return;
+  }
+  if ((status & 0xF0) === 0xB0 && bytes[1] === 1 && bytes.length >= 3) {
+    const deviceTempo = 20 + bytes[2];
+    linkTempo = Math.max(LINK_TEMPO_MIN, Math.min(LINK_TEMPO_MAX, deviceTempo));
+    updateLinkUi();
+  }
+}
+
+function handleBleMidiNotification(event) {
+  decodeBleMidiPacket(event.target.value).forEach(handleBleMidiMessage);
+}
+
+function handleLinkBridgeNotification(event) {
+  handleLinkBridgeStatus(event.target.value);
+}
+
+function handleBleMidiDisconnect() {
+  bleMidiCharacteristic = undefined;
+  linkBridgeCharacteristic = undefined;
+  bleMidiServer = undefined;
+  bleMidiDevice = undefined;
+  linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
+  linkLastDeviceBeat = -1;
+  setLinkPlaying(false);
+  linkPeerCount.textContent = '—';
+  bleMidiDeviceName.textContent = '未连接';
+  setBleLinkStatus('BLE MIDI 已断开');
+  updateLinkUi();
+}
+
+async function connectBleMidi() {
+  if (!navigator.bluetooth) {
+    setBleLinkStatus(browserMessage('Web Bluetooth'));
+    return;
+  }
+  bleMidiConnectButton.disabled = true;
+  setBleLinkStatus('请在浏览器设备窗口中选择 HOHO-C6…');
+  try {
+    bleMidiDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [BLE_MIDI_SERVICE_UUID] }],
+      optionalServices: [BLE_MIDI_SERVICE_UUID],
+    });
+    bleMidiDevice.addEventListener('gattserverdisconnected', handleBleMidiDisconnect);
+    bleMidiServer = await bleMidiDevice.gatt.connect();
+    const service = await bleMidiServer.getPrimaryService(BLE_MIDI_SERVICE_UUID);
+    bleMidiCharacteristic = await service.getCharacteristic(BLE_MIDI_CHARACTERISTIC_UUID);
+    if (bleMidiCharacteristic.properties.notify) {
+      await bleMidiCharacteristic.startNotifications();
+      bleMidiCharacteristic.addEventListener('characteristicvaluechanged', handleBleMidiNotification);
+    }
+    try {
+      linkBridgeCharacteristic = await service.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
+      if (linkBridgeCharacteristic.properties.notify) {
+        await linkBridgeCharacteristic.startNotifications();
+        linkBridgeCharacteristic.addEventListener('characteristicvaluechanged', handleLinkBridgeNotification);
+      }
+      if (linkBridgeCharacteristic.properties.read) {
+        handleLinkBridgeStatus(await linkBridgeCharacteristic.readValue());
+      }
+    } catch {
+      linkBridgeCharacteristic = undefined;
+    }
+    bleMidiDeviceName.textContent = bleMidiDevice.name || 'BLE MIDI';
+    setBleLinkStatus(linkBridgeCharacteristic ? 'BLE MIDI 已连接 · 等待 Link 状态' : 'BLE MIDI 已连接 · 需要新版 ESP32 固件读取 Link 状态');
+    updateLinkUi();
+  } catch (error) {
+    bleMidiCharacteristic = undefined;
+    linkBridgeCharacteristic = undefined;
+    bleMidiServer = undefined;
+    bleMidiDevice = undefined;
+    if (error.name === 'NotFoundError') setBleLinkStatus('未选择 BLE MIDI 设备');
+    else setBleLinkStatus(`BLE MIDI 连接失败：${error.message || error}`);
+    updateLinkUi();
+  }
+}
+
+async function disconnectBleMidi() {
+  if (bleMidiCharacteristic?.properties.notify) {
+    try { await bleMidiCharacteristic.stopNotifications(); } catch { /* already disconnected */ }
+    bleMidiCharacteristic.removeEventListener('characteristicvaluechanged', handleBleMidiNotification);
+  }
+  if (linkBridgeCharacteristic?.properties.notify) {
+    try { await linkBridgeCharacteristic.stopNotifications(); } catch { /* already disconnected */ }
+    linkBridgeCharacteristic.removeEventListener('characteristicvaluechanged', handleLinkBridgeNotification);
+  }
+  if (bleMidiDevice?.gatt?.connected) bleMidiDevice.gatt.disconnect();
+  handleBleMidiDisconnect();
+}
+
+bleMidiConnectButton.addEventListener('click', () => void connectBleMidi());
+bleMidiDisconnectButton.addEventListener('click', () => void disconnectBleMidi());
+linkEnableButton.addEventListener('click', async () => {
+  const enabled = !(linkBridgeCharacteristic && linkDeviceState.enabled);
+  try {
+    if (linkBridgeCharacteristic) {
+      await sendLinkBridgeCommand(0x01, [enabled ? 1 : 0]);
+    } else if (await sendBleMidiMessage(Uint8Array.of(0x9F, 0x02, 0x7F))) {
+      setBleLinkStatus('已发送 LINK 切换；旧固件无法回读状态');
+    }
+  } catch (error) {
+    setBleLinkStatus(`LINK 切换失败：${error.message || error}`);
+  }
+});
+linkPlayButton.addEventListener('click', async () => {
+  try {
+    if (linkBridgeCharacteristic) await sendLinkBridgeCommand(0x03);
+    else if (await sendBleMidiMessage(Uint8Array.of(0xFA))) setLinkPlaying(true, true);
+  } catch (error) {
+    setBleLinkStatus(`发送 PLAY 失败：${error.message || error}`);
+  }
+});
+linkStopButton.addEventListener('click', async () => {
+  try {
+    if (linkBridgeCharacteristic) await sendLinkBridgeCommand(0x04);
+    else if (await sendBleMidiMessage(Uint8Array.of(0xFC))) setLinkPlaying(false);
+  } catch (error) {
+    setBleLinkStatus(`发送 STOP 失败：${error.message || error}`);
+  }
+});
+linkMetronomeButton.addEventListener('click', () => {
+  linkMetronomeEnabled = !linkMetronomeEnabled;
+  updateLinkUi();
+  if (linkMetronomeEnabled && linkPlaying && !linkBridgeCharacteristic) playMetronomeClick(linkBeatIndex === 0);
+});
+linkTempoSlider.addEventListener('input', async () => {
+  linkTempo = Number(linkTempoSlider.value);
+  updateLinkUi();
+  if (!bleMidiCharacteristic) return;
+  try {
+    if (linkBridgeCharacteristic) {
+      const tenths = Math.round(linkTempo * 10);
+      await sendLinkBridgeCommand(0x02, [tenths & 0xFF, (tenths >> 8) & 0xFF]);
+    } else {
+      const deviceValue = Math.max(0, Math.min(127, Math.round(linkTempo - 20)));
+      await sendBleMidiMessage(Uint8Array.from([0xBF, 0x01, deviceValue]));
+      if (linkTempo > 147) setBleLinkStatus('网页 Tempo 可到 300；旧 ESP32 MIDI 控制映射上限为 147 BPM');
+    }
+  } catch (error) {
+    setBleLinkStatus(`发送 Tempo 失败：${error.message || error}`);
+  }
+});
+updateLinkUi();
+
 async function readSerial() {
   if (!serialPort?.readable || monitorRunning) return;
   monitorRunning = true;
@@ -1303,7 +1710,6 @@ async function readSerial() {
     monitorRunning = false;
     monitorState.textContent = 'STOPPED';
     monitorState.style.color = 'var(--danger)';
-    if (!serialPort?.readable) updateVirtualDiskModeToggle();
   }
 }
 
@@ -1374,7 +1780,6 @@ async function connectGohoSerialAutomatically() {
   serialButton.textContent = '断开串口';
   const usbId = serialPortUsbId(serialPort);
   serialStatus.textContent = `已自动连接：${portName(serialPort)}${usbId ? ` · USB ${usbId}` : ''}，等待数据`;
-  updateVirtualDiskModeToggle();
   addMessage(`自动连接 GOHO CDC：${portName(serialPort)}${usbId ? ` · USB ${usbId}` : ''}`);
   readSerial();
   return serialPort;
@@ -1392,7 +1797,6 @@ enterVirtualDiskButton.addEventListener('click', async () => {
       : `一键进入失败：${error.message || error}`);
   } finally {
     enterVirtualDiskButton.disabled = false;
-    updateVirtualDiskModeToggle();
   }
 });
 
@@ -1412,7 +1816,6 @@ serialButton.addEventListener('click', async () => {
       serialPort = undefined;
       serialButton.textContent = '选择 CDC 设备';
       serialStatus.textContent = '已断开';
-      updateVirtualDiskModeToggle();
       return;
     }
     // Always open the browser chooser so the user explicitly selects the device.
@@ -1427,14 +1830,12 @@ serialButton.addEventListener('click', async () => {
       ? ` · USB ${selectedPortInfo.usbVendorId.toString(16).padStart(4, '0')}:${selectedPortInfo.usbProductId.toString(16).padStart(4, '0')}`
       : '';
     serialStatus.textContent = `已连接：${portName(serialPort)}${usbId}，等待数据`;
-    updateVirtualDiskModeToggle();
     addMessage(`串口已连接：${portName(serialPort)}${usbId}，波特率 ${baudRate.value}`);
     readSerial();
   } catch (error) {
     serialStatus.textContent = error.name === 'NotFoundError' ? '未选择设备' : `连接失败：${error.message}`;
     serialPort = undefined;
     serialWriter = undefined;
-    updateVirtualDiskModeToggle();
   }
 });
 

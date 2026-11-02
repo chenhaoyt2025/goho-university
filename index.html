@@ -79,15 +79,10 @@
                 <div class="panel-signal"><span></span> WORLD / MSC</div>
                 <div class="panel-icon">▱</div>
                 <h3 id="virtual-disk-title">虚拟磁盘烧录</h3>
-                <p>连接 CDC 后打开开关，设备自动进入 GOHO UPDATE；固件可先选好或直接拖入。</p>
+                <p>点击按钮自动连接 CDC 并进入 GOHO UPDATE；固件可先选好或直接拖入。</p>
               </div>
               <div class="disk-actions">
                 <button class="button button-primary" id="enterVirtualDiskButton" type="button">一键进入 GOHO UPDATE</button>
-                <label class="disk-mode-switch" for="virtualDiskModeToggle">
-                  <span>虚拟磁盘烧录</span>
-                  <input id="virtualDiskModeToggle" type="checkbox" role="switch" disabled />
-                  <i aria-hidden="true"></i>
-                </label>
                 <button class="button button-secondary" id="virtualDiskButton" type="button" hidden>绑定 GOHO UPDATE</button>
                 <input id="virtualDiskFile" type="file" accept=".bin,.BIN" hidden />
                 <div class="disk-drop-zone" id="virtualDiskDropZone" role="button" tabindex="0" aria-disabled="true">
@@ -133,6 +128,39 @@
                 </div>
                 <label class="audio-volume" for="audioVolume">监听音量 <input id="audioVolume" type="range" min="0" max="100" value="33" /><output id="audioVolumeValue">33%</output></label>
                 <span class="card-status" id="audioStatus">等待选择 USB Audio 输入 · 选择通道后自动监听</span>
+              </div>
+            </article>
+
+            <article class="world-panel world-panel-ble-link" id="ble-link" aria-labelledby="ble-link-title">
+              <div class="ble-link-copy">
+                <div class="panel-signal"><span></span> WORLD / BLE MIDI</div>
+                <div class="panel-icon">♫</div>
+                <h3 id="ble-link-title">BLE MIDI / Ableton Link</h3>
+                <p>搜索 HOHO-C6，连接 BLE MIDI，并直接读取和控制 Ableton Link。</p>
+              </div>
+              <div class="ble-link-actions">
+                <div class="ble-midi-actions">
+                  <button class="button button-primary" id="bleMidiConnectButton" type="button">搜索 BLE MIDI</button>
+                  <button class="button button-ghost" id="bleMidiDisconnectButton" type="button" disabled>断开</button>
+                  <span class="ble-midi-device" id="bleMidiDeviceName">未连接</span>
+                </div>
+                <div class="link-status-grid" aria-label="Ableton Link 状态">
+                  <div><small>LINK</small><strong id="linkNetworkState">OFFLINE</strong></div>
+                  <div><small>PEERS</small><strong id="linkPeerCount">—</strong></div>
+                  <div><small>PLAY</small><strong id="linkPlayState">STOPPED</strong></div>
+                  <div><small>TEMPO</small><strong><output id="linkTempoValue">120</output><small> BPM</small></strong></div>
+                </div>
+                <div class="link-controls">
+                  <button class="button button-secondary" id="linkEnableButton" type="button">LINK OFF</button>
+                  <button class="button button-secondary" id="linkPlayButton" type="button">PLAY</button>
+                  <button class="button button-ghost" id="linkStopButton" type="button">STOP</button>
+                  <button class="button button-ghost" id="linkMetronomeButton" type="button" aria-pressed="false">METRONOME OFF</button>
+                  <label class="link-tempo" for="linkTempoSlider">TEMPO <input id="linkTempoSlider" type="range" min="30" max="300" value="120" /><output id="linkTempoSliderValue">120</output></label>
+                </div>
+                <div class="link-beat-grid" id="linkBeatGrid" aria-label="四拍节拍器">
+                  <i>1</i><i>2</i><i>3</i><i>4</i>
+                </div>
+                <span class="card-status" id="bleLinkStatus">请先搜索 BLE MIDI</span>
               </div>
             </article>
 
