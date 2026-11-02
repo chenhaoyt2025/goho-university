@@ -328,3 +328,84 @@ h1 em { color: transparent; font-style: normal; background: linear-gradient(100d
   .link-tempo input { width: 100%; }
   .disk-drop-zone, .disk-actions progress, .disk-file-name, .disk-actions .card-status { grid-column: auto; }
 }
+
+
+/* Keep the CDC controls, serial window, and USB Audio controls in one deck. */
+.control-deck {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(290px, .82fr) minmax(0, 1.18fr);
+  gap: 20px;
+  align-items: stretch;
+}
+.control-deck .world-panel {
+  grid-column: auto;
+  min-height: 0;
+  transform: none;
+  padding: 24px;
+}
+.control-deck .world-panel-serial {
+  display: flex;
+  flex-direction: column;
+}
+.control-deck .world-panel-audio {
+  display: grid;
+  grid-template-columns: minmax(120px, .68fr) minmax(0, 1.32fr);
+  gap: 22px;
+  align-items: start;
+}
+.control-deck .world-panel-serial .panel-icon,
+.control-deck .world-panel-audio .panel-icon {
+  margin: 22px 0 10px;
+}
+.control-deck .world-panel h3 { font-size: 24px; }
+.control-deck .world-panel p { font-size: 12px; line-height: 1.55; }
+.control-deck .serial-controls { margin-top: 24px; }
+.serial-routing-note {
+  display: block;
+  margin-top: 9px;
+  color: var(--faint);
+  font: 10px/1.5 var(--mono);
+}
+.control-deck .monitor {
+  margin-top: 20px;
+  border-radius: 14px;
+  box-shadow: 0 16px 55px rgba(0, 0, 0, .28);
+}
+.control-deck .monitor-header {
+  padding: 9px 12px;
+  font-size: 9px;
+}
+.control-deck .monitor-header strong { font-size: 9px; }
+.control-deck .monitor-actions { gap: 8px; }
+.control-deck .monitor-actions label { font-size: 9px; }
+.control-deck .monitor-actions select,
+.control-deck .send-row select {
+  padding: 5px 8px;
+  font-size: 10px;
+}
+.control-deck .monitor pre {
+  min-height: 108px;
+  max-height: 180px;
+  padding: 12px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.control-deck .send-row input {
+  padding: 10px 11px;
+  font-size: 11px;
+}
+.control-deck .send-row .button { margin: 5px; }
+
+@media (max-width: 820px) {
+  .control-deck { grid-template-columns: 1fr; gap: 30px; }
+  .control-deck .world-panel-audio { grid-template-columns: 1fr; gap: 12px; }
+}
+
+@media (max-width: 520px) {
+  .control-deck .world-panel { padding: 20px 18px; }
+  .control-deck .monitor pre {
+    min-height: 88px;
+    max-height: 150px;
+  }
+}
