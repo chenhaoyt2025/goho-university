@@ -170,6 +170,12 @@ let linkAudioContext;
 let linkLastClockTime = 0;
 let linkClockPulses = 0;
 let linkClockIntervals = [];
+let bleMidiClockTimer;
+let bleMidiClockToken = 0;
+let bleMidiClockRunning = false;
+let bleMidiClockNextDue = 0;
+let bleMidiClockPulseCount = 0;
+let bleMidiClockWriteChain = Promise.resolve();
 let linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
 let espWifiState = { configured: false, started: false, connected: false, ssid: '', ip: '' };
 let espWifiNetworks = [];
@@ -1548,6 +1554,92 @@ async function sendBleMidiMessage(message) {
   return writeBleCharacteristic(bleMidiCharacteristic, encodeBleMidiPacket(message));
 }
 
+function isEsp32LinkMode() {
+  return Boolean(linkBridgeCharacteristic && linkDeviceState.enabled);
+}
+
+function isBleMidiClockMode() {
+  return Boolean(bleMidiCharacteristic) && !isEsp32LinkMode();
+}
+
+function bleMidiClockIntervalMs() {
+  const bpm = Math.max(LINK_TEMPO_MIN, Math.min(LINK_TEMPO_MAX, Number(linkTempo) || 120));
+  return 60000 / (bpm * 24);
+}
+
+function enqueueBleMidiMessage(message, shouldSend = () => true) {
+  const write = bleMidiClockWriteChain
+    .catch(() => false)
+    .then(() => {
+      if (!bleMidiCharacteristic || !shouldSend()) return false;
+      return writeBleCharacteristic(bleMidiCharacteristic, encodeBleMidiPacket(message));
+    });
+  bleMidiClockWriteChain = write.catch(() => false);
+  return write;
+}
+
+function scheduleBleMidiClock(token) {
+  if (token !== bleMidiClockToken || !bleMidiClockRunning || !isBleMidiClockMode()) return;
+
+  const delay = Math.max(0, bleMidiClockNextDue - performance.now());
+  bleMidiClockTimer = window.setTimeout(() => {
+    if (token !== bleMidiClockToken || !bleMidiClockRunning || !isBleMidiClockMode()) return;
+
+    const now = performance.now();
+    bleMidiClockPulseCount += 1;
+    if (bleMidiClockPulseCount % 24 === 0) {
+      const quarterBeat = Math.floor(bleMidiClockPulseCount / 24) - 1;
+      updateLinkBeat(quarterBeat % 4);
+      if (linkMetronomeEnabled) playMetronomeClick(quarterBeat % 4 === 0);
+    }
+
+    void enqueueBleMidiMessage(Uint8Array.of(0xF8), () =>
+      token === bleMidiClockToken && bleMidiClockRunning && isBleMidiClockMode());
+
+    const interval = bleMidiClockIntervalMs();
+    bleMidiClockNextDue += interval;
+    if (bleMidiClockNextDue <= now) {
+      bleMidiClockNextDue = now + interval;
+    }
+    scheduleBleMidiClock(token);
+  }, delay);
+}
+
+async function stopBleMidiClock(sendStop = false) {
+  const wasRunning = bleMidiClockRunning;
+  bleMidiClockRunning = false;
+  bleMidiClockToken += 1;
+  if (bleMidiClockTimer) window.clearTimeout(bleMidiClockTimer);
+  bleMidiClockTimer = undefined;
+  bleMidiClockNextDue = 0;
+  bleMidiClockPulseCount = 0;
+
+  if (sendStop && wasRunning && bleMidiCharacteristic) {
+    await enqueueBleMidiMessage(Uint8Array.of(0xFC));
+  } else {
+    await bleMidiClockWriteChain.catch(() => false);
+  }
+}
+
+async function startBleMidiClock() {
+  if (!isBleMidiClockMode()) {
+    setBleLinkStatus('请先关闭 ESP32 LINK，再使用 BLE MIDI PPQN 同步');
+    return false;
+  }
+
+  await stopBleMidiClock(false);
+  const started = await enqueueBleMidiMessage(Uint8Array.of(0xFA));
+  if (!started) return false;
+
+  bleMidiClockRunning = true;
+  bleMidiClockPulseCount = 0;
+  updateLinkBeat(0);
+  bleMidiClockNextDue = performance.now() + bleMidiClockIntervalMs();
+  const token = bleMidiClockToken;
+  scheduleBleMidiClock(token);
+  return true;
+}
+
 async function sendLinkBridgeCommand(command, payload = []) {
   if (!linkBridgeCharacteristic) return false;
   return writeBleCharacteristic(linkBridgeCharacteristic, Uint8Array.from([command, ...payload]));
@@ -1921,6 +2013,7 @@ async function connectBleMidi() {
 }
 
 async function disconnectBleMidi() {
+  await stopBleMidiClock(false);
   if (bleMidiCharacteristic?.properties.notify) {
     try { await bleMidiCharacteristic.stopNotifications(); } catch { /* already disconnected */ }
     bleMidiCharacteristic.removeEventListener('characteristicvaluechanged', handleBleMidiNotification);
@@ -1977,7 +2070,15 @@ linkEnableButton.addEventListener('click', async () => {
   const enabled = !(linkBridgeCharacteristic && linkDeviceState.enabled);
   try {
     if (linkBridgeCharacteristic) {
+      if (enabled) {
+        await stopBleMidiClock(true);
+      }
       await sendLinkBridgeCommand(0x01, [enabled ? 1 : 0]);
+      linkDeviceState.enabled = enabled;
+      if (enabled) {
+        setLinkPlaying(false);
+      }
+      updateLinkUi();
     } else if (await sendBleMidiMessage(Uint8Array.of(0x9F, 0x02, 0x7F))) {
       setBleLinkStatus('已发送 LINK 切换；旧固件无法回读状态');
     }
@@ -1987,16 +2088,31 @@ linkEnableButton.addEventListener('click', async () => {
 });
 linkPlayButton.addEventListener('click', async () => {
   try {
-    if (linkBridgeCharacteristic) await sendLinkBridgeCommand(0x03);
-    else if (await sendBleMidiMessage(Uint8Array.of(0xFA))) setLinkPlaying(true, true);
+    if (isEsp32LinkMode()) {
+      await sendLinkBridgeCommand(0x03);
+      return;
+    }
+    if (linkBridgeCharacteristic) {
+      if (await startBleMidiClock()) setLinkPlaying(true, true);
+    } else if (await sendBleMidiMessage(Uint8Array.of(0xFA))) {
+      setLinkPlaying(true, true);
+    }
   } catch (error) {
     setBleLinkStatus(`发送 PLAY 失败：${error.message || error}`);
   }
 });
 linkStopButton.addEventListener('click', async () => {
   try {
-    if (linkBridgeCharacteristic) await sendLinkBridgeCommand(0x04);
-    else if (await sendBleMidiMessage(Uint8Array.of(0xFC))) setLinkPlaying(false);
+    if (isEsp32LinkMode()) {
+      await sendLinkBridgeCommand(0x04);
+      return;
+    }
+    if (linkBridgeCharacteristic) {
+      await stopBleMidiClock(true);
+      setLinkPlaying(false);
+    } else if (await sendBleMidiMessage(Uint8Array.of(0xFC))) {
+      setLinkPlaying(false);
+    }
   } catch (error) {
     setBleLinkStatus(`发送 STOP 失败：${error.message || error}`);
   }
@@ -2008,13 +2124,16 @@ linkMetronomeButton.addEventListener('click', () => {
 });
 linkTempoSlider.addEventListener('input', async () => {
   linkTempo = Number(linkTempoSlider.value);
+  if (bleMidiClockRunning) {
+    bleMidiClockNextDue = Math.min(bleMidiClockNextDue, performance.now() + bleMidiClockIntervalMs());
+  }
   updateLinkUi();
   if (!bleMidiCharacteristic) return;
   try {
-    if (linkBridgeCharacteristic) {
+    if (isEsp32LinkMode()) {
       const tenths = Math.round(linkTempo * 10);
       await sendLinkBridgeCommand(0x02, [tenths & 0xFF, (tenths >> 8) & 0xFF]);
-    } else {
+    } else if (!linkBridgeCharacteristic) {
       const deviceValue = Math.max(0, Math.min(127, Math.round(linkTempo - 20)));
       await sendBleMidiMessage(Uint8Array.from([0xBF, 0x01, deviceValue]));
       if (linkTempo > 147) setBleLinkStatus('网页 Tempo 可到 300；旧 ESP32 MIDI 控制映射上限为 147 BPM');
