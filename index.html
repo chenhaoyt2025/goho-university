@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050711" />
+    <meta name="description" content="GOHO University — Tools for Noise: Eurorack, FX pedal, VST, Max/MSP, macOS app and browser hardware tools." />
+    <title>GOHO University · Tools for Noise</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="space-app">
+      <canvas id="backgroundCanvas" aria-hidden="true"></canvas>
+      <canvas id="spaceCanvas" aria-hidden="true"></canvas>
+      <div class="star-wash" aria-hidden="true"></div>
+      <div class="world-labels" id="worldLabels" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <div class="topbar-inner">
+          <a class="brand" href="#top" aria-label="GOHO University home">
+            <span class="brand-mark cat-logo"><img src="./goho-cat.png" alt="GOHO cat logo" width="35" height="35" /></span>
+            <span class="brand-copy">
+              <strong>GOHO UNIVERSITY</strong>
+              <small>Tools for Noise</small>
+            </span>
+          </a>
+          <nav class="nav tab-nav" aria-label="Main navigation">
+            <button class="top-tab is-active" type="button" data-tab-target="update" aria-selected="true">UPDATE</button>
+            <button class="top-tab" type="button" data-tab-target="usb" aria-selected="false">USB</button>
+            <button class="top-tab" type="button" data-tab-target="ble" aria-selected="false">BLE / WIFI</button>
+          </nav>
+          <span class="status-pill"><i></i> IN FLIGHT</span>
+        </div>
+      </header>
+
+      <main id="top" class="universe">
+        <div class="flight-layout">
+          <aside class="command-rail" aria-label="GOHO device controls">
+            <div class="rail-heading">
+              <p class="eyebrow">GOHO CONTROL DECK</p>
+              <h1>Tools for Noise</h1>
+              <p>左侧是设备舱，右侧是持续旋转的平行星系。</p>
+            </div>
+
+            <section class="tab-panel is-active" id="tools" data-tab-panel="update" aria-labelledby="update-tab-title">
+              <div class="section-heading compact-heading">
+                <div><p class="eyebrow">UPDATE WORLD</p><h2 id="update-tab-title">DFU / 虚拟磁盘</h2></div>
+                <p>两种固件入口放在同一个世界里。</p>
+              </div>
+
+              <div class="update-stack">
+                <article class="world-panel world-panel-dfu" aria-labelledby="dfu-title">
+                  <div class="panel-signal"><span></span> DFU FLASH</div>
+                  <div class="panel-icon">↥</div>
+                  <h3 id="dfu-title">在线 DFU 烧录</h3>
+                  <p>选择固件与 DFU 设备，然后直接写入 Flash。</p>
+                  <div class="firmware-picker">
+                    <input id="firmwareFile" type="file" accept=".bin,.hex,.BIN,.HEX" hidden />
+                    <label class="button button-secondary" for="firmwareFile">选择 BIN / HEX</label>
+                    <span id="firmwareName">尚未选择文件</span>
+                  </div>
+                  <div class="panel-actions">
+                    <button class="button button-primary" id="dfuButton" type="button">选择 DFU 设备</button>
+                    <button class="button button-secondary" id="flashButton" type="button" disabled>开始烧录</button>
+                  </div>
+                  <progress id="flashProgress" value="0" max="100" hidden></progress>
+                  <span class="card-status" id="dfuStatus">等待设备和固件</span>
+                </article>
+
+                <article class="world-panel world-panel-disk" id="virtualDisk" aria-labelledby="virtual-disk-title">
+                  <div class="disk-copy">
+                    <div class="panel-signal"><span></span> VIRTUAL DISK</div>
+                    <div class="panel-icon">▱</div>
+                    <h3 id="virtual-disk-title">虚拟磁盘烧录</h3>
+                    <p>自动连接 CDC，发送 XXX，等待 GOHO UPDATE 出现。</p>
+                  </div>
+                  <div class="disk-actions">
+                    <button class="button button-primary" id="enterVirtualDiskButton" type="button">一键进入 GOHO UPDATE</button>
+                    <button class="button button-secondary" id="virtualDiskButton" type="button" hidden>绑定 GOHO UPDATE</button>
+                    <input id="virtualDiskFile" type="file" accept=".bin,.BIN" hidden />
+                    <div class="disk-drop-zone" id="virtualDiskDropZone" role="button" tabindex="0" aria-disabled="true">
+                      <strong>拖入或选择 BIN 固件</strong>
+                      <small>自动写入 UPDATE.BIN · 只显示 BIN 文件</small>
+                    </div>
+                    <progress id="virtualDiskProgress" value="0" max="100" hidden></progress>
+                    <span class="disk-file-name" id="virtualDiskFileName">等待 GOHO UPDATE</span>
+                    <span class="card-status" id="virtualDiskStatus">先进入 GOHO UPDATE</span>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="tab-panel" id="usbPanel" data-tab-panel="usb" aria-labelledby="usb-tab-title" hidden>
+              <div class="section-heading compact-heading">
+                <div><p class="eyebrow">USB WORLD</p><h2 id="usb-tab-title">CDC / 声卡</h2></div>
+                <p>串口与 USB Audio 共用一个设备舱。</p>
+              </div>
+
+              <div class="control-deck" id="cdc-audio-deck">
+                <article class="world-panel world-panel-serial" id="serial" aria-labelledby="serial-title">
+                  <div class="panel-signal"><span></span> CDC SERIAL</div>
+                  <div class="panel-icon">⌁</div>
+                  <h3 id="serial-title">Serial Monitor</h3>
+                  <p>选择 CDC 设备，查看输出并发送 TXT / HEX 指令。</p>
+                  <div class="serial-controls">
+                    <label>Baud rate <select id="baudRate"><option>115200</option><option>57600</option><option>38400</option><option>9600</option></select></label>
+                    <button class="button button-secondary" id="serialButton" type="button">选择 CDC 设备</button>
+                  </div>
+                  <span class="card-status" id="serialStatus">尚未连接</span>
+                  <span class="serial-routing-note">USB MODE 和 REV 会复用此 CDC；未连接时会自动连接。</span>
+
+                  <div class="monitor" id="monitorPanel" hidden>
+                    <div class="monitor-header">
+                      <span>LIVE SERIAL OUTPUT <strong id="monitorState">STOPPED</strong></span>
+                      <div class="monitor-actions">
+                        <label>接收 <select id="receiveFormat"><option value="text">TXT</option><option value="hex">HEX</option></select></label>
+                        <button class="text-button" id="startMonitor" type="button">Start</button>
+                        <button class="text-button" id="stopMonitor" type="button">Stop</button>
+                        <button class="text-button" id="clearLog" type="button">清空</button>
+                      </div>
+                    </div>
+                    <pre id="serialLog" aria-live="polite">等待串口数据…</pre>
+                    <form class="send-row" id="sendForm">
+                      <select id="sendFormat" aria-label="Send format"><option value="text">TXT</option><option value="hex">HEX</option></select>
+                      <select id="lineEnding" aria-label="Line ending"><option value="none">无结尾</option><option value="lf">LF</option><option value="crlf">CRLF</option></select>
+                      <input id="sendInput" placeholder="TXT 文本，或 HEX：01 03 00 00" autocomplete="off" />
+                      <button class="button button-primary" type="submit">发送 ↗</button>
+                    </form>
+                  </div>
+                </article>
+
+                <article class="world-panel world-panel-audio" id="usb-audio" aria-labelledby="usb-audio-title">
+                  <div class="audio-copy">
+                    <div class="panel-signal"><span></span> USB AUDIO</div>
+                    <div class="panel-icon">◉</div>
+                    <h3 id="usb-audio-title">USB 声卡监听</h3>
+                    <p>选择声卡输入、通道和电脑输出设备。</p>
+                  </div>
+                  <div class="audio-actions">
+                    <button class="button button-primary" id="audioRefreshButton" type="button">扫描 USB 声卡</button>
+                    <select id="audioInputSelect" aria-label="USB 声卡输入" disabled><option value="">请先授权并扫描设备</option></select>
+                    <select id="audioOutputSelect" aria-label="声音输出设备" disabled><option value="">系统默认声音设备</option></select>
+                    <div class="audio-channel-summary" id="audioChannelSummary">输入通道：等待检测 · 输出：系统默认声音设备 2ch</div>
+                    <div class="audio-wheel-row" aria-label="输入通道选择">
+                      <div class="audio-wheel-group"><label for="audioMonoChannelSelect">MONO</label><select class="audio-wheel-select" id="audioMonoChannelSelect" aria-label="单声道输入通道" disabled><option value="">OFF</option></select></div>
+                      <div class="audio-wheel-group"><label for="audioStereoChannelSelect">STEREO</label><select class="audio-wheel-select" id="audioStereoChannelSelect" aria-label="双声道输入通道" disabled><option value="">OFF</option></select></div>
+                    </div>
+                    <div class="audio-command-row" aria-label="USB 音频源模式">
+                      <span class="audio-command-label">USB MODE</span>
+                      <button class="button button-ghost audio-mode-button" data-audio-command="USB" type="button" aria-pressed="false">USB</button>
+                      <button class="button button-ghost audio-mode-button" data-audio-command="LINE" type="button" aria-pressed="false">LINE</button>
+                      <button class="button button-ghost audio-mode-button" data-audio-command="SYNTH" type="button" aria-pressed="false">SYNTH</button>
+                      <button class="button button-ghost audio-mode-button is-active" data-audio-command="OFF" type="button" aria-pressed="true">OFF</button>
+                    </div>
+                    <label class="audio-reverb" for="audioRevSlider">REV <input id="audioRevSlider" type="range" min="0" max="100" value="0" /><output id="audioRevValue">0</output></label>
+                    <div class="audio-action-row"><button class="button button-ghost audio-mute-button" id="audioMuteButton" type="button" aria-label="静音" aria-pressed="false" disabled>M</button></div>
+                    <label class="audio-volume" for="audioVolume">监听音量 <input id="audioVolume" type="range" min="0" max="100" value="33" /><output id="audioVolumeValue">33%</output></label>
+                    <span class="card-status" id="audioStatus">等待选择 USB Audio 输入 · 选择通道后自动监听</span>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="tab-panel" id="blePanel" data-tab-panel="ble" aria-labelledby="ble-tab-title" hidden>
+              <div class="section-heading compact-heading">
+                <div><p class="eyebrow">WIRELESS WORLD</p><h2 id="ble-tab-title">BLE MIDI / LINK</h2></div>
+                <p>BLE MIDI 与 WiFi Ableton Link 分开工作。</p>
+              </div>
+
+              <article class="world-panel world-panel-ble-link" id="ble-link" aria-labelledby="ble-link-title">
+                <div class="ble-link-copy link-console">
+                  <div class="panel-signal"><span></span> ABLETON LINK</div>
+                  <div class="panel-icon">◌</div>
+                  <h3 id="ble-link-title">Ableton Link</h3>
+                  <p>网页作为独立 Link 设备加入 WiFi，与 ESP32 保持同步。</p>
+                  <div class="link-status-grid" aria-label="Ableton Link 状态">
+                    <div><small>LINK</small><strong id="linkNetworkState">OFFLINE</strong></div>
+                    <div><small>PEERS</small><strong id="linkPeerCount">—</strong></div>
+                    <div><small>PLAY</small><strong id="linkPlayState">STOPPED</strong></div>
+                    <div><small>TEMPO</small><strong><output id="linkTempoValue">120</output><small> BPM</small></strong></div>
+                  </div>
+                  <div class="link-controls">
+                    <button class="button button-secondary" id="linkEnableButton" type="button">LINK OFF</button>
+                    <button class="button button-secondary" id="linkPlayButton" type="button">PLAY</button>
+                    <button class="button button-ghost" id="linkStopButton" type="button">STOP</button>
+                    <button class="button button-ghost" id="linkMetronomeButton" type="button" aria-pressed="false">METRONOME OFF</button>
+                  </div>
+                  <label class="link-tempo" for="linkTempoSlider">TEMPO <input id="linkTempoSlider" type="range" min="30" max="300" value="120" /><output id="linkTempoSliderValue">120</output></label>
+                  <div class="link-beat-grid" id="linkBeatGrid" aria-label="四拍节拍器"><i>1</i><i>2</i><i>3</i><i>4</i></div>
+                </div>
+                <div class="ble-link-actions ble-midi-console">
+                  <div class="panel-signal"><span></span> BLE MIDI</div>
+                  <h3>BLE MIDI</h3>
+                  <div class="ble-midi-actions">
+                    <button class="button button-primary" id="bleMidiConnectButton" type="button">搜索 BLE MIDI</button>
+                    <button class="button button-ghost" id="bleMidiDisconnectButton" type="button" disabled>断开</button>
+                    <span class="ble-midi-device" id="bleMidiDeviceName">未连接</span>
+                  </div>
+                  <div class="ble-midi-state-grid" aria-label="BLE MIDI 状态">
+                    <div><small>NOTE</small><strong>—</strong></div>
+                    <div><small>CC</small><strong>—</strong></div>
+                    <div><small>SYNC</small><strong>—</strong></div>
+                  </div>
+                  <div class="esp-wifi-config" aria-label="ESP32 WiFi 配置">
+                    <div class="esp-wifi-row">
+                      <button class="button button-ghost" id="espWifiScanButton" type="button" disabled>扫描 WiFi</button>
+                      <select id="espWifiNetworkSelect" aria-label="ESP32 WiFi 网络" disabled><option value="">先连接 BLE MIDI</option></select>
+                      <input id="espWifiPassword" type="password" autocomplete="off" placeholder="WiFi 密码" disabled />
+                      <button class="button button-secondary" id="espWifiSaveButton" type="button" disabled>保存并连接</button>
+                    </div>
+                    <span class="card-status" id="espWifiStatus">先连接 ESP32 的 BLE MIDI</span>
+                  </div>
+                  <span class="card-status" id="bleLinkStatus">请先搜索 BLE MIDI</span>
+                </div>
+              </article>
+            </section>
+          </aside>
+
+          <section class="galaxy-stage" id="products" aria-label="360 degree GOHO galaxy">
+            <div class="stage-hud stage-hud-top"><span>PARALLEL SPACE</span><span>DRAG TO TURN</span></div>
+            <div class="stage-center-copy">
+              <span class="eyebrow">GOHO UNIVERSITY / FLIGHT DECK</span>
+              <h2>在不同世界之间航行</h2>
+              <p>左右循环旋转，上下查看有限视角。点击星球进入对应功能舱。</p>
+            </div>
+            <div class="stage-hud stage-hud-bottom"><span>U / FX / VST / MAX / MACOS</span><span>360° FIELD</span></div>
+          </section>
+        </div>
+      </main>
+
+      <footer class="footer"><span>© 2026 GOHO UNIVERSITY</span><span>PARALLEL SPACE / v0.4</span></footer>
+    </div>
+    <script src="./app.js?v=0.5.1" type="module"></script>
+  </body>
+</html>
