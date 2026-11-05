@@ -161,6 +161,7 @@ let bleMidiDevice;
 let bleMidiServer;
 let bleMidiCharacteristic;
 let linkBridgeCharacteristic;
+let linkBridgeDiscoveryError = '';
 let linkTempo = 120;
 let linkPlaying = false;
 let linkMetronomeEnabled = false;
@@ -1721,7 +1722,7 @@ function updateEspWifiUi() {
   espWifiSaveButton.disabled = !bridgeReady || !espWifiNetworkSelect.value;
 
   if (!bridgeReady) {
-    setEspWifiStatus('先连接 ESP32 的 BLE MIDI');
+    setEspWifiStatus(linkBridgeDiscoveryError || '先连接 ESP32 的 BLE MIDI');
     return;
   }
   if (espWifiState.connected) {
@@ -1951,6 +1952,7 @@ function handleLinkBridgeNotification(event) {
 function handleBleMidiDisconnect() {
   bleMidiCharacteristic = undefined;
   linkBridgeCharacteristic = undefined;
+  linkBridgeDiscoveryError = '';
   bleMidiServer = undefined;
   bleMidiDevice = undefined;
   linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
@@ -1986,24 +1988,50 @@ async function connectBleMidi() {
       await bleMidiCharacteristic.startNotifications();
       bleMidiCharacteristic.addEventListener('characteristicvaluechanged', handleBleMidiNotification);
     }
+    linkBridgeCharacteristic = undefined;
+    linkBridgeDiscoveryError = '';
     try {
-      linkBridgeCharacteristic = await service.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
-      if (linkBridgeCharacteristic.properties.notify) {
+      // Some Chromium variants fail direct getCharacteristic() on a custom
+      // characteristic after a service-cache update. Enumerate the service
+      // first and match the UUID explicitly so the WiFi bridge is discoverable.
+      const characteristics = typeof service.getCharacteristics === 'function'
+        ? await service.getCharacteristics()
+        : [];
+      linkBridgeCharacteristic = characteristics.find((characteristic) =>
+        characteristic.uuid.toLowerCase() === LINK_BRIDGE_CHARACTERISTIC_UUID
+      );
+      if (!linkBridgeCharacteristic) {
+        // Keep compatibility with browsers that do not expose getCharacteristics().
+        linkBridgeCharacteristic = await service.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
+      }
+    } catch (error) {
+      linkBridgeCharacteristic = undefined;
+      linkBridgeDiscoveryError = `WiFi 桥接特征未找到：${error.message || error}`;
+    }
+    if (linkBridgeCharacteristic?.properties.notify) {
+      try {
         await linkBridgeCharacteristic.startNotifications();
         linkBridgeCharacteristic.addEventListener('characteristicvaluechanged', handleLinkBridgeNotification);
+      } catch (error) {
+        linkBridgeDiscoveryError = `WiFi 桥接通知不可用：${error.message || error}`;
       }
-      if (linkBridgeCharacteristic.properties.read) {
+    }
+    if (linkBridgeCharacteristic?.properties.read) {
+      try {
         handleLinkBridgeStatus(await linkBridgeCharacteristic.readValue());
+      } catch (error) {
+        linkBridgeDiscoveryError = `WiFi 桥接读取失败：${error.message || error}`;
       }
-    } catch {
-      linkBridgeCharacteristic = undefined;
     }
     bleMidiDeviceName.textContent = bleMidiDevice.name || 'BLE MIDI';
-    setBleLinkStatus(linkBridgeCharacteristic ? 'BLE MIDI 已连接 · 等待 Link 状态' : 'BLE MIDI 已连接 · 需要新版 ESP32 固件读取 Link 状态');
+    setBleLinkStatus(linkBridgeCharacteristic
+      ? 'BLE MIDI 已连接 · 等待 Link 状态'
+      : `BLE MIDI 已连接 · ${linkBridgeDiscoveryError || '未找到 WiFi 桥接特征'}`);
     updateLinkUi();
   } catch (error) {
     bleMidiCharacteristic = undefined;
     linkBridgeCharacteristic = undefined;
+    linkBridgeDiscoveryError = '';
     bleMidiServer = undefined;
     bleMidiDevice = undefined;
     if (error.name === 'NotFoundError') setBleLinkStatus('未选择 BLE MIDI 设备');
