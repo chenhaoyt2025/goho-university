@@ -124,6 +124,7 @@ const VIRTUAL_DISK_HANDLE_STORE = 'handles';
 const VIRTUAL_DISK_HANDLE_KEY = 'goho-update-root';
 const BLE_MIDI_SERVICE_UUID = '03b80e5a-ede8-4b33-a751-6ce34ec4c700';
 const BLE_MIDI_CHARACTERISTIC_UUID = '7772e5db-3868-4112-a1a9-f2669d106bf3';
+const LINK_BRIDGE_SERVICE_UUID = '9c5d3f2a-0d8e-4a0f-9a5d-4f7e9b0c22a0';
 const LINK_BRIDGE_CHARACTERISTIC_UUID = '9c5d3f2a-0d8e-4a0f-9a5d-4f7e9b0c22a1';
 const LINK_BRIDGE_STATUS_MAGIC = 0xa1;
 const LINK_TEMPO_MIN = 30;
@@ -1978,7 +1979,7 @@ async function connectBleMidi() {
   try {
     bleMidiDevice = await navigator.bluetooth.requestDevice({
       filters: [{ services: [BLE_MIDI_SERVICE_UUID] }],
-      optionalServices: [BLE_MIDI_SERVICE_UUID],
+      optionalServices: [BLE_MIDI_SERVICE_UUID, LINK_BRIDGE_SERVICE_UUID],
     });
     bleMidiDevice.addEventListener('gattserverdisconnected', handleBleMidiDisconnect);
     bleMidiServer = await bleMidiDevice.gatt.connect();
@@ -1991,22 +1992,28 @@ async function connectBleMidi() {
     linkBridgeCharacteristic = undefined;
     linkBridgeDiscoveryError = '';
     try {
-      // Some Chromium variants fail direct getCharacteristic() on a custom
-      // characteristic after a service-cache update. Enumerate the service
-      // first and match the UUID explicitly so the WiFi bridge is discoverable.
-      const characteristics = typeof service.getCharacteristics === 'function'
-        ? await service.getCharacteristics()
-        : [];
-      linkBridgeCharacteristic = characteristics.find((characteristic) =>
-        characteristic.uuid.toLowerCase() === LINK_BRIDGE_CHARACTERISTIC_UUID
-      );
-      if (!linkBridgeCharacteristic) {
-        // Keep compatibility with browsers that do not expose getCharacteristics().
-        linkBridgeCharacteristic = await service.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
-      }
+      // The bridge has its own primary service. Keeping it separate from the
+      // standard BLE MIDI service avoids host-side GATT caches and preserves
+      // compatibility with BLE MIDI clients that expect only one characteristic.
+      const bridgeService = await bleMidiServer.getPrimaryService(LINK_BRIDGE_SERVICE_UUID);
+      linkBridgeCharacteristic = await bridgeService.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
     } catch (error) {
-      linkBridgeCharacteristic = undefined;
-      linkBridgeDiscoveryError = `WiFi 桥接特征未找到：${error.message || error}`;
+      // Compatibility with an older bridge firmware that placed the bridge
+      // characteristic inside the BLE MIDI service.
+      try {
+        const characteristics = typeof service.getCharacteristics === 'function'
+          ? await service.getCharacteristics()
+          : [];
+        linkBridgeCharacteristic = characteristics.find((characteristic) =>
+          characteristic.uuid.toLowerCase() === LINK_BRIDGE_CHARACTERISTIC_UUID
+        );
+        if (!linkBridgeCharacteristic) {
+          linkBridgeCharacteristic = await service.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
+        }
+      } catch (legacyError) {
+        linkBridgeCharacteristic = undefined;
+        linkBridgeDiscoveryError = `WiFi 桥接特征未找到：${legacyError.message || legacyError}`;
+      }
     }
     if (linkBridgeCharacteristic?.properties.notify) {
       try {
