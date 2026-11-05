@@ -1943,7 +1943,13 @@ function handleBleMidiMessage(message) {
 }
 
 function handleBleMidiNotification(event) {
-  decodeBleMidiPacket(event.target.value).forEach(handleBleMidiMessage);
+  const value = event.target.value;
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (bytes.length && bytes[0] >= 0xA1 && bytes[0] <= 0xA4) {
+    handleLinkBridgeStatus(value);
+    return;
+  }
+  decodeBleMidiPacket(value).forEach(handleBleMidiMessage);
 }
 
 function handleLinkBridgeNotification(event) {
@@ -1979,7 +1985,10 @@ async function connectBleMidi() {
   try {
     bleMidiDevice = await navigator.bluetooth.requestDevice({
       filters: [{ services: [BLE_MIDI_SERVICE_UUID] }],
-      optionalServices: [BLE_MIDI_SERVICE_UUID, LINK_BRIDGE_SERVICE_UUID],
+      // The web bridge uses the existing BLE MIDI characteristic. Do not
+      // request the old custom service: macOS/Chromium can cache that GATT
+      // database across firmware updates.
+      optionalServices: [BLE_MIDI_SERVICE_UUID],
     });
     bleMidiDevice.addEventListener('gattserverdisconnected', handleBleMidiDisconnect);
     bleMidiServer = await bleMidiDevice.gatt.connect();
@@ -1989,47 +1998,25 @@ async function connectBleMidi() {
       await bleMidiCharacteristic.startNotifications();
       bleMidiCharacteristic.addEventListener('characteristicvaluechanged', handleBleMidiNotification);
     }
+
+    // New firmware advertises bridge capability by returning an A1 status
+    // packet from the stable BLE MIDI characteristic. Older firmware returns
+    // no data, so it remains ordinary BLE MIDI only.
     linkBridgeCharacteristic = undefined;
     linkBridgeDiscoveryError = '';
     try {
-      // The bridge has its own primary service. Keeping it separate from the
-      // standard BLE MIDI service avoids host-side GATT caches and preserves
-      // compatibility with BLE MIDI clients that expect only one characteristic.
-      const bridgeService = await bleMidiServer.getPrimaryService(LINK_BRIDGE_SERVICE_UUID);
-      linkBridgeCharacteristic = await bridgeService.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
+      const bridgeStatus = await bleMidiCharacteristic.readValue();
+      const bytes = new Uint8Array(bridgeStatus.buffer, bridgeStatus.byteOffset, bridgeStatus.byteLength);
+      if (bytes[0] === LINK_BRIDGE_STATUS_MAGIC) {
+        linkBridgeCharacteristic = bleMidiCharacteristic;
+        handleLinkBridgeStatus(bridgeStatus);
+      } else {
+        linkBridgeDiscoveryError = '未找到 WiFi 桥接特征';
+      }
     } catch (error) {
-      // Compatibility with an older bridge firmware that placed the bridge
-      // characteristic inside the BLE MIDI service.
-      try {
-        const characteristics = typeof service.getCharacteristics === 'function'
-          ? await service.getCharacteristics()
-          : [];
-        linkBridgeCharacteristic = characteristics.find((characteristic) =>
-          characteristic.uuid.toLowerCase() === LINK_BRIDGE_CHARACTERISTIC_UUID
-        );
-        if (!linkBridgeCharacteristic) {
-          linkBridgeCharacteristic = await service.getCharacteristic(LINK_BRIDGE_CHARACTERISTIC_UUID);
-        }
-      } catch (legacyError) {
-        linkBridgeCharacteristic = undefined;
-        linkBridgeDiscoveryError = `WiFi 桥接特征未找到：${legacyError.message || legacyError}`;
-      }
+      linkBridgeDiscoveryError = `WiFi 桥接读取失败：${error.message || error}`;
     }
-    if (linkBridgeCharacteristic?.properties.notify) {
-      try {
-        await linkBridgeCharacteristic.startNotifications();
-        linkBridgeCharacteristic.addEventListener('characteristicvaluechanged', handleLinkBridgeNotification);
-      } catch (error) {
-        linkBridgeDiscoveryError = `WiFi 桥接通知不可用：${error.message || error}`;
-      }
-    }
-    if (linkBridgeCharacteristic?.properties.read) {
-      try {
-        handleLinkBridgeStatus(await linkBridgeCharacteristic.readValue());
-      } catch (error) {
-        linkBridgeDiscoveryError = `WiFi 桥接读取失败：${error.message || error}`;
-      }
-    }
+
     bleMidiDeviceName.textContent = bleMidiDevice.name || 'BLE MIDI';
     setBleLinkStatus(linkBridgeCharacteristic
       ? 'BLE MIDI 已连接 · 等待 Link 状态'
@@ -2053,7 +2040,7 @@ async function disconnectBleMidi() {
     try { await bleMidiCharacteristic.stopNotifications(); } catch { /* already disconnected */ }
     bleMidiCharacteristic.removeEventListener('characteristicvaluechanged', handleBleMidiNotification);
   }
-  if (linkBridgeCharacteristic?.properties.notify) {
+  if (linkBridgeCharacteristic && linkBridgeCharacteristic !== bleMidiCharacteristic && linkBridgeCharacteristic.properties.notify) {
     try { await linkBridgeCharacteristic.stopNotifications(); } catch { /* already disconnected */ }
     linkBridgeCharacteristic.removeEventListener('characteristicvaluechanged', handleLinkBridgeNotification);
   }
