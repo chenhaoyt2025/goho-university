@@ -178,6 +178,11 @@ let bleMidiClockRunning = false;
 let bleMidiClockNextDue = 0;
 let bleMidiClockPulseCount = 0;
 let bleMidiClockWriteChain = Promise.resolve();
+let linkBridgeBeatTimer;
+let linkBridgeClock = { beat: 0, tempo: 120, receivedAt: 0, playing: false };
+let linkTempoSendTimer;
+let linkTempoSendInFlight = false;
+let linkTempoSendPending = false;
 let linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
 let espWifiState = { configured: false, started: false, connected: false, ssid: '', ip: '' };
 let espWifiNetworks = [];
@@ -1711,6 +1716,47 @@ function parseUint16LE(bytes, offset) {
   return bytes[offset] | (bytes[offset + 1] << 8);
 }
 
+function parseUint32LE(bytes, offset) {
+  return (bytes[offset] |
+    (bytes[offset + 1] << 8) |
+    (bytes[offset + 2] << 16) |
+    (bytes[offset + 3] * 0x1000000)) >>> 0;
+}
+
+function renderLinkBridgeBeat() {
+  if (!linkBridgeCharacteristic || !linkBridgeClock.receivedAt) return;
+
+  const now = performance.now();
+  const elapsedBeats = linkBridgeClock.playing
+    ? ((now - linkBridgeClock.receivedAt) * linkBridgeClock.tempo) / 60000
+    : 0;
+  const beat = linkBridgeClock.beat + Math.max(0, elapsedBeats);
+  const beatIndex = ((Math.floor(beat) % 4) + 4) % 4;
+
+  if (!linkBridgeClock.playing) {
+    linkLastDeviceBeat = -1;
+    updateLinkBeat(0);
+    return;
+  }
+
+  if (beatIndex !== linkLastDeviceBeat) {
+    linkLastDeviceBeat = beatIndex;
+    updateLinkBeat(beatIndex);
+    if (linkMetronomeEnabled) playMetronomeClick(beatIndex === 0);
+  }
+}
+
+function startLinkBridgeBeatTimer() {
+  if (linkBridgeBeatTimer) return;
+  linkBridgeBeatTimer = window.setInterval(renderLinkBridgeBeat, 20);
+}
+
+function stopLinkBridgeBeatTimer() {
+  if (!linkBridgeBeatTimer) return;
+  window.clearInterval(linkBridgeBeatTimer);
+  linkBridgeBeatTimer = undefined;
+}
+
 function setEspWifiStatus(message) {
   espWifiStatus.textContent = message;
 }
@@ -1822,25 +1868,26 @@ function handleLinkBridgeStatus(value) {
   if (bytes.length < 7 || bytes[0] !== LINK_BRIDGE_STATUS_MAGIC) return;
   const flags = bytes[1];
   const phase = parseUint16LE(bytes, 5) / 1000;
+  const tempo = parseUint16LE(bytes, 3) / 10;
+  const beat = bytes.length >= 11 ? parseUint32LE(bytes, 7) / 1000 : phase;
   linkDeviceState = {
     enabled: Boolean(flags & 0x01),
     wifi: Boolean(flags & 0x02),
     playing: Boolean(flags & 0x04),
     peers: bytes[2],
-    tempo: parseUint16LE(bytes, 3) / 10,
+    tempo,
     phase,
   };
-  linkTempo = Math.max(LINK_TEMPO_MIN, Math.min(LINK_TEMPO_MAX, linkDeviceState.tempo || linkTempo));
+  linkTempo = Math.max(LINK_TEMPO_MIN, Math.min(LINK_TEMPO_MAX, tempo || linkTempo));
   linkPlaying = linkDeviceState.playing;
-  const beatIndex = Math.floor(phase) % 4;
-  if (linkPlaying && beatIndex !== linkLastDeviceBeat) {
-    linkLastDeviceBeat = beatIndex;
-    updateLinkBeat(beatIndex);
-    if (linkMetronomeEnabled) playMetronomeClick(beatIndex === 0);
-  } else if (!linkPlaying) {
-    linkLastDeviceBeat = -1;
-    updateLinkBeat(0);
-  }
+  linkBridgeClock = {
+    beat,
+    tempo: linkTempo,
+    receivedAt: performance.now(),
+    playing: linkPlaying,
+  };
+  startLinkBridgeBeatTimer();
+  renderLinkBridgeBeat();
   const state = linkDeviceState.enabled
     ? (linkDeviceState.wifi ? `LINK 已连接 · ${linkDeviceState.peers} 个设备` : 'LINK 已开启 · 等待 WiFi')
     : 'BLE MIDI 已连接 · LINK 未开启';
@@ -1960,6 +2007,8 @@ function handleBleMidiDisconnect() {
   bleMidiCharacteristic = undefined;
   linkBridgeCharacteristic = undefined;
   linkBridgeDiscoveryError = '';
+  stopLinkBridgeBeatTimer();
+  linkBridgeClock = { beat: 0, tempo: 120, receivedAt: 0, playing: false };
   bleMidiServer = undefined;
   bleMidiDevice = undefined;
   linkDeviceState = { enabled: false, wifi: false, playing: false, peers: 0, tempo: 120, phase: 0 };
@@ -2144,25 +2193,41 @@ linkMetronomeButton.addEventListener('click', () => {
   updateLinkUi();
   if (linkMetronomeEnabled && linkPlaying && !linkBridgeCharacteristic) playMetronomeClick(linkBeatIndex === 0);
 });
-linkTempoSlider.addEventListener('input', async () => {
+async function flushLinkTempoCommand() {
+  if (linkTempoSendInFlight || !linkTempoSendPending) return;
+  linkTempoSendInFlight = true;
+  linkTempoSendPending = false;
+  const tempo = linkTempo;
+  try {
+    if (isEsp32LinkMode()) {
+      const tenths = Math.round(tempo * 10);
+      await sendLinkBridgeCommand(0x02, [tenths & 0xFF, (tenths >> 8) & 0xFF]);
+    } else if (!linkBridgeCharacteristic) {
+      const deviceValue = Math.max(0, Math.min(127, Math.round(tempo - 20)));
+      await sendBleMidiMessage(Uint8Array.from([0xBF, 0x01, deviceValue]));
+      if (tempo > 147) setBleLinkStatus('网页 Tempo 可到 300；旧 ESP32 MIDI 控制映射上限为 147 BPM');
+    }
+  } catch (error) {
+    setBleLinkStatus(`发送 Tempo 失败：${error.message || error}`);
+  } finally {
+    linkTempoSendInFlight = false;
+    if (linkTempoSendPending) void flushLinkTempoCommand();
+  }
+}
+
+linkTempoSlider.addEventListener('input', () => {
   linkTempo = Number(linkTempoSlider.value);
   if (bleMidiClockRunning) {
     bleMidiClockNextDue = Math.min(bleMidiClockNextDue, performance.now() + bleMidiClockIntervalMs());
   }
   updateLinkUi();
   if (!bleMidiCharacteristic) return;
-  try {
-    if (isEsp32LinkMode()) {
-      const tenths = Math.round(linkTempo * 10);
-      await sendLinkBridgeCommand(0x02, [tenths & 0xFF, (tenths >> 8) & 0xFF]);
-    } else if (!linkBridgeCharacteristic) {
-      const deviceValue = Math.max(0, Math.min(127, Math.round(linkTempo - 20)));
-      await sendBleMidiMessage(Uint8Array.from([0xBF, 0x01, deviceValue]));
-      if (linkTempo > 147) setBleLinkStatus('网页 Tempo 可到 300；旧 ESP32 MIDI 控制映射上限为 147 BPM');
-    }
-  } catch (error) {
-    setBleLinkStatus(`发送 Tempo 失败：${error.message || error}`);
-  }
+  linkTempoSendPending = true;
+  if (linkTempoSendTimer) window.clearTimeout(linkTempoSendTimer);
+  linkTempoSendTimer = window.setTimeout(() => {
+    linkTempoSendTimer = undefined;
+    void flushLinkTempoCommand();
+  }, 50);
 });
 renderEspWifiNetworks();
 updateLinkUi();
